@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fisheye Camera Control</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
+        h1, h2 { color: #343a40; }
+        .container { max-width: 800px; margin: auto; }
+        .controls, .system-controls { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6;}
+        button, a.download-button { padding: 10px 15px; margin: 5px; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; text-decoration: none; display: inline-block; background-color: #fff; color: #343a40; }
+        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
+        #status { margin-top: 15px; font-weight: bold; min-height: 1.4em; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
+        .output { margin-top: 20px; padding: 1rem; border: 1px solid #dee2e6; background-color: #fff; border-radius: 5px;}
+        .output img, .output video { display: block; margin-top: 10px; max-width: 100%; height: auto; border-radius: 4px; }
+        .output a.download-button { margin-top: 10px; background-color: #0d6efd; color: white; border-color: #0d6efd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Fisheye Camera Control</h1>
+
+        <div class="controls">
+            <h2>Camera</h2>
+            <button id="captureBtn">Capture Image</button>
+            <button id="startRecordBtn">Start Recording</button>
+            <button id="stopRecordBtn" disabled>Stop Recording</button>
+        </div>
+
+        <div class="system-controls">
+            <h2>System</h2>
+            <button id="statusBtn">Get Status</button>
+            <button id="healthBtn">Get Health Report</button>
+            <button id="restartAppBtn">Restart Application</button>
+            <button id="restartPiBtn">Restart Raspberry Pi</button>
+        </div>
+
+        <div id="status">Ready</div>
+
+        <div class="output">
+            <h2>Latest Output</h2>
+            <div id="media-output"></div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
