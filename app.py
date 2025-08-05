@@ -9,7 +9,7 @@ from common.camera_controller import (
     cleanup,
     get_recording_status,
 )
-from common.system_controller import restart_app, restart_pi
+from common.system_controller import restart_app, restart_system
 from utils.health_check import get_health_report
 
 app = Flask(__name__)
@@ -21,7 +21,6 @@ IMAGE_EXTENSION = ".jpg"
 VIDEO_EXTENSION = ".mp4"
 
 # --- Application Startup ---
-# This code will now run when Gunicorn starts the worker
 print("--- Initializing Application ---")
 os.makedirs(OUTPUT_DIR_IMAGES, exist_ok=True)
 os.makedirs(OUTPUT_DIR_VIDEOS, exist_ok=True)
@@ -72,8 +71,8 @@ def stop_recording_route():
         return jsonify({"success": False, "message": message}), 500
 
 
-@app.route("/status", methods=["GET"])
-def status_route():
+@app.route("/device_status", methods=["GET"])
+def device_status_route():
     """Endpoint to get the current recording status."""
     is_recording = get_recording_status()
     if is_recording:
@@ -96,19 +95,16 @@ def restart_app_route():
     return jsonify({"success": True, "message": "Application is restarting."})
 
 
-@app.route("/restart_pi", methods=["POST"])
-def restart_pi_route():
+@app.route("/restart_system", methods=["POST"])
+def restart_system_route():
     """Endpoint to restart the Raspberry Pi."""
-    restart_pi()
-    return jsonify({"success": True, "message": "Raspberry Pi is restarting."})
+    restart_system()
+    return jsonify({"success": True, "message": "System is restarting."})
 
 
 if __name__ == "__main__":
-    # This block is useful for local testing without Gunicorn
-    # It will not be used by the systemd service
     print("--- Running in development mode ---")
     try:
-        # The key change is adding use_reloader=False
         app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)
     except KeyboardInterrupt:
         print("Keyboard interrupt received, cleaning up.")

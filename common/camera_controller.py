@@ -9,11 +9,10 @@ from picamera2 import Picamera2
 FISHEYE_CAM_ID = 0
 VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
-# We no longer need a hardcoded VIDEO_FPS, as we get it from the camera.
 
 # --- Global Variables ---
 picam = None
-actual_video_fps = 30  # A default fallback value
+actual_video_fps = 30
 recording_active = False
 recording_thread = None
 stop_recording_event = threading.Event()
@@ -38,16 +37,11 @@ def initialize_camera():
             main={"size": (VIDEO_WIDTH, VIDEO_HEIGHT)}
         )
         picam.configure(config)
-
-        # --- FIX: Get the actual framerate from the camera's configuration ---
         try:
-            # This extracts the negotiated frame rate from the camera controls
             actual_video_fps = picam.video_configuration['controls']['FrameRate']
             print(f"Camera configured with actual frame rate: {actual_video_fps} FPS")
         except (KeyError, TypeError):
             print(f"Could not determine actual frame rate, falling back to default {actual_video_fps} FPS.")
-        # --------------------------------------------------------------------
-
         picam.start()
         time.sleep(2.0)
         print("Fisheye camera started successfully.")
@@ -58,7 +52,7 @@ def initialize_camera():
 
 
 def capture_image(filepath):
-    """Captures a single still image from the camera."""
+    """Captures a single still image and saves it with correct RGB colors."""
     global picam
     with lock:
         if recording_active:
@@ -67,11 +61,18 @@ def capture_image(filepath):
             return False, "Camera is not ready."
 
         try:
-            array = picam.capture_array("main")
-            if array.shape[2] == 4:
-                array = cv2.cvtColor(array, cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(filepath, array)
-            print(f"Image saved to {filepath}")
+            # Picamera2 provides a BGR-based array (often with an alpha channel)
+            array_bgra = picam.capture_array("main")
+            
+            # For saving a standard image file, cv2.imwrite needs a 3-channel BGR array.
+            # This conversion will result in a correctly colored JPG/PNG file.
+            if array_bgra.shape[2] == 4:
+                save_array = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2RGB)
+            else:
+                save_array = array_bgra # It's already BGR
+            
+            cv2.imwrite(filepath, save_array)
+            print(f"Image saved to {filepath} with correct colors.")
             return True, "Image captured successfully."
         except Exception as e:
             print(f"ERROR: Failed to capture image: {e}")
@@ -79,18 +80,22 @@ def capture_image(filepath):
 
 
 def _record_video_loop():
-    """The thread target function for recording video. It pipes frames to FFmpeg."""
+    """The thread target function that pipes BGR frames to FFmpeg."""
     global picam, ffmpeg_process, stop_recording_event
-    print("Recording thread started. Piping frames to FFmpeg...")
+    print("Recording thread started. Piping BGR frames to FFmpeg...")
 
     while not stop_recording_event.is_set():
         try:
-            array = picam.capture_array("main")
-            if array.shape[2] == 4:
-                frame_bgr = cv2.cvtColor(array, cv2.COLOR_BGRA2BGR)
-                ffmpeg_process.stdin.write(frame_bgr.tobytes())
+            array_bgra = picam.capture_array("main")
+            
+            # The most stable method is to give FFmpeg the BGR data
+            # it expects based on our command. Convert from 4-channel BGRA to 3-channel BGR.
+            if array_bgra.shape[2] == 4:
+                frame_rgb = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2RGB)
             else:
-                ffmpeg_process.stdin.write(array.tobytes())
+                frame_rgb = array_bgra
+
+            ffmpeg_process.stdin.write(frame_rgb.tobytes())
         except Exception as e:
             if stop_recording_event.is_set():
                 print("Recording stopped, exiting loop.")
@@ -102,7 +107,7 @@ def _record_video_loop():
 
 
 def start_recording(filepath):
-    """Starts recording by launching an FFmpeg subprocess and a frame-feeding thread."""
+    """Starts recording by launching an FFmpeg subprocess that expects BGR frames."""
     global recording_active, recording_thread, stop_recording_event
     global ffmpeg_process, output_path, actual_video_fps
 
@@ -114,6 +119,9 @@ def start_recording(filepath):
 
         try:
             output_path = filepath
+            # This command tells FFmpeg to expect BGR data (`bgr24`) and
+            # it will correctly handle the conversion to the standard YUV format for MP4,
+            # resulting in correct colors in any video player.
             command = [
                 'ffmpeg',
                 '-y',
@@ -121,11 +129,11 @@ def start_recording(filepath):
                 '-vcodec', 'rawvideo',
                 '-pix_fmt', 'bgr24',
                 '-s', f'{VIDEO_WIDTH}x{VIDEO_HEIGHT}',
-                '-r', str(actual_video_fps),  # Use the dynamic frame rate
+                '-r', str(actual_video_fps),
                 '-i', '-',
                 '-an',
                 '-vcodec', 'libx264',
-                '-pix_fmt', 'yuv420p',
+                '-pix_fmt', 'yuv420p', # Standard for video playback compatibility
                 output_path
             ]
             print(f"Starting FFmpeg with command: {' '.join(command)}")

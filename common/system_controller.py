@@ -1,21 +1,23 @@
 import os
 import sys
 
+# The name of your systemd service file
+SERVICE_NAME = "camera_app.service"
 
 def restart_app():
-    """Restarts the current Python application."""
-    print("--- Restarting Application ---")
+    """Restarts the application by restarting the systemd service."""
+    print(f"--- Restarting Application via systemctl restart {SERVICE_NAME} ---")
     try:
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
+        # Use sudo to run the systemctl command
+        os.system(f"sudo systemctl restart {SERVICE_NAME}")
     except Exception as e:
-        print(f"ERROR: Failed to restart application: {e}")
+        print(f"ERROR: Failed to restart application service: {e}")
 
 
-def restart_pi():
+def restart_system():
     """Reboots the Raspberry Pi."""
-    print("--- Restarting Raspberry Pi ---")
+    print("--- Restarting System ---")
     try:
         os.system("sudo reboot")
     except Exception as e:
-        print(f"ERROR: Failed to restart Raspberry Pi: {e}")
+        print(f"ERROR: Failed to restart system: {e}")

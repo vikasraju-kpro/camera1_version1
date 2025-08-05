@@ -4,3 +4,4 @@ numpy
 opencv-python
 picamera2
 psutil
+matplotlib

@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusBtn = document.getElementById('statusBtn');
     const healthBtn = document.getElementById('healthBtn');
     const restartAppBtn = document.getElementById('restartAppBtn');
-    const restartPiBtn = document.getElementById('restartPiBtn');
+    const restartSystemBtn = document.getElementById('restartSystemBtn');
     const statusDiv = document.getElementById('status');
     const mediaOutputDiv = document.getElementById('media-output');
 
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event Listeners ---
     statusBtn.addEventListener('click', async () => {
         try {
-            const response = await fetch('/status');
+            const response = await fetch('/device_status');
             const data = await response.json();
             updateStatus(data.message, false);
         } catch (error) {
@@ -141,10 +141,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    restartPiBtn.addEventListener('click', () => {
-        if (confirm('Are you sure you want to restart the Raspberry Pi? This will disconnect you.')) {
-            updateStatus('Restarting Raspberry Pi...');
-            apiPost('/restart_pi');
+    restartSystemBtn.addEventListener('click', () => {
+        if (confirm('Are you sure you want to restart the system? This will disconnect you.')) {
+            updateStatus('Restarting system...');
+            apiPost('/restart_system');
         }
     });
 });
