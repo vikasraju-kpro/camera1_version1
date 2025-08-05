@@ -7,7 +7,7 @@ from common.camera_controller import (
     start_recording,
     stop_recording,
     cleanup,
-    get_recording_status, # New import
+    get_recording_status,
 )
 from common.system_controller import restart_app, restart_pi
 from utils.health_check import get_health_report
@@ -19,6 +19,14 @@ OUTPUT_DIR_IMAGES = "static/captures"
 OUTPUT_DIR_VIDEOS = "static/recordings"
 IMAGE_EXTENSION = ".jpg"
 VIDEO_EXTENSION = ".mp4"
+
+# --- Application Startup ---
+# This code will now run when Gunicorn starts the worker
+print("--- Initializing Application ---")
+os.makedirs(OUTPUT_DIR_IMAGES, exist_ok=True)
+os.makedirs(OUTPUT_DIR_VIDEOS, exist_ok=True)
+initialize_camera()
+# --- End Application Startup ---
 
 
 @app.route("/")
@@ -33,17 +41,9 @@ def capture_image_route():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"capture_{timestamp}{IMAGE_EXTENSION}"
     filepath = os.path.join(OUTPUT_DIR_IMAGES, filename)
-
     success, message = capture_image(filepath)
-
     if success:
-        return jsonify(
-            {
-                "success": True,
-                "message": message,
-                "image_url": url_for("static", filename=f"captures/{filename}"),
-            }
-        )
+        return jsonify({"success": True, "message": message, "image_url": url_for("static", filename=f"captures/{filename}")})
     else:
         return jsonify({"success": False, "message": message}), 500
 
@@ -54,9 +54,7 @@ def start_recording_route():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"recording_{timestamp}{VIDEO_EXTENSION}"
     filepath = os.path.join(OUTPUT_DIR_VIDEOS, filename)
-
     success, message = start_recording(filepath)
-
     if success:
         return jsonify({"success": True, "message": message})
     else:
@@ -67,16 +65,9 @@ def start_recording_route():
 def stop_recording_route():
     """Endpoint to stop video recording."""
     success, message, video_path = stop_recording()
-
     if success:
         video_filename = os.path.basename(video_path)
-        return jsonify(
-            {
-                "success": True,
-                "message": message,
-                "video_url": url_for("static", filename=f"recordings/{video_filename}"),
-            }
-        )
+        return jsonify({"success": True, "message": message, "video_url": url_for("static", filename=f"recordings/{video_filename}")})
     else:
         return jsonify({"success": False, "message": message}), 500
 
@@ -113,11 +104,12 @@ def restart_pi_route():
 
 
 if __name__ == "__main__":
-    os.makedirs(OUTPUT_DIR_IMAGES, exist_ok=True)
-    os.makedirs(OUTPUT_DIR_VIDEOS, exist_ok=True)
-    initialize_camera()
+    # This block is useful for local testing without Gunicorn
+    # It will not be used by the systemd service
+    print("--- Running in development mode ---")
     try:
-        app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+        # The key change is adding use_reloader=False
+        app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)
     except KeyboardInterrupt:
         print("Keyboard interrupt received, cleaning up.")
     finally:

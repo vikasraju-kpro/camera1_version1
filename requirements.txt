@@ -1,0 +1,6 @@
+Flask
+gunicorn
+numpy
+opencv-python
+picamera2
+psutil
