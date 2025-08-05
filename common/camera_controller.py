@@ -9,10 +9,11 @@ from picamera2 import Picamera2
 FISHEYE_CAM_ID = 0
 VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
-VIDEO_FPS = 30
+# We no longer need a hardcoded VIDEO_FPS, as we get it from the camera.
 
 # --- Global Variables ---
 picam = None
+actual_video_fps = 30  # A default fallback value
 recording_active = False
 recording_thread = None
 stop_recording_event = threading.Event()
@@ -29,7 +30,7 @@ def get_recording_status():
 
 def initialize_camera():
     """Initializes and configures the fisheye camera."""
-    global picam
+    global picam, actual_video_fps
     print("--- Initializing Fisheye Camera ---")
     try:
         picam = Picamera2(camera_num=FISHEYE_CAM_ID)
@@ -37,6 +38,16 @@ def initialize_camera():
             main={"size": (VIDEO_WIDTH, VIDEO_HEIGHT)}
         )
         picam.configure(config)
+
+        # --- FIX: Get the actual framerate from the camera's configuration ---
+        try:
+            # This extracts the negotiated frame rate from the camera controls
+            actual_video_fps = picam.video_configuration['controls']['FrameRate']
+            print(f"Camera configured with actual frame rate: {actual_video_fps} FPS")
+        except (KeyError, TypeError):
+            print(f"Could not determine actual frame rate, falling back to default {actual_video_fps} FPS.")
+        # --------------------------------------------------------------------
+
         picam.start()
         time.sleep(2.0)
         print("Fisheye camera started successfully.")
@@ -93,7 +104,7 @@ def _record_video_loop():
 def start_recording(filepath):
     """Starts recording by launching an FFmpeg subprocess and a frame-feeding thread."""
     global recording_active, recording_thread, stop_recording_event
-    global ffmpeg_process, output_path
+    global ffmpeg_process, output_path, actual_video_fps
 
     with lock:
         if recording_active:
@@ -110,7 +121,7 @@ def start_recording(filepath):
                 '-vcodec', 'rawvideo',
                 '-pix_fmt', 'bgr24',
                 '-s', f'{VIDEO_WIDTH}x{VIDEO_HEIGHT}',
-                '-r', str(VIDEO_FPS),
+                '-r', str(actual_video_fps),  # Use the dynamic frame rate
                 '-i', '-',
                 '-an',
                 '-vcodec', 'libx264',
