@@ -11,6 +11,7 @@ from common.camera_controller import (
 )
 from common.system_controller import restart_app, restart_system
 from utils.health_check import get_health_report
+from utils.device_info import get_device_uuid, get_device_name
 
 app = Flask(__name__)
 
@@ -73,13 +74,19 @@ def stop_recording_route():
 
 @app.route("/device_status", methods=["GET"])
 def device_status_route():
-    """Endpoint to get the current recording status."""
+    """Endpoint to get the current recording status, device name, and device_id."""
     is_recording = get_recording_status()
     if is_recording:
         status_message = "Active: Recording is in progress."
     else:
         status_message = "Idle: Not currently recording."
-    return jsonify({"recording": is_recording, "message": status_message})
+    
+    return jsonify({
+        "name": get_device_name(),
+        "device_id": get_device_uuid(), # Changed from "UUID"
+        "recording": is_recording, 
+        "message": status_message
+    })
 
 
 @app.route("/health_report", methods=["GET"])
@@ -97,9 +104,13 @@ def restart_app_route():
 
 @app.route("/restart_system", methods=["POST"])
 def restart_system_route():
-    """Endpoint to restart the Raspberry Pi."""
+    """Endpoint to restart the Raspberry Pi, including the device_id in the response."""
     restart_system()
-    return jsonify({"success": True, "message": "System is restarting."})
+    return jsonify({
+        "success": True, 
+        "message": "System is restarting.",
+        "device_id": get_device_uuid() # Changed from "UUID" for consistency
+    })
 
 
 if __name__ == "__main__":

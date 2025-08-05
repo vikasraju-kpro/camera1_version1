@@ -74,7 +74,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/device_status');
             const data = await response.json();
-            updateStatus(data.message, false);
+            // Display the new detailed status message using device_id
+            const statusMessage = `${data.name} (ID: ${data.device_id}) | Status: ${data.message}`;
+            updateStatus(statusMessage, false);
         } catch (error) {
             updateStatus('Failed to get status.', true);
         }
@@ -126,7 +128,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.error) {
                 updateStatus(`Error: ${data.details}`, true);
             } else {
-                const report = `CPU: ${data.cpu_usage_percent}% | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
+                // Display the new health report including the device_id
+                const report = `Device ID: ${data.device_id} | CPU: ${data.cpu_usage_percent}% | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
                 updateStatus(report, false);
             }
         } catch (error) {
@@ -141,10 +144,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    restartSystemBtn.addEventListener('click', () => {
+    restartSystemBtn.addEventListener('click', async () => {
         if (confirm('Are you sure you want to restart the system? This will disconnect you.')) {
-            updateStatus('Restarting system...');
-            apiPost('/restart_system');
+            const result = await apiPost('/restart_system');
+            // Display the device_id in the restart message
+            const statusMessage = `${result.message} (ID: ${result.device_id})`;
+            updateStatus(statusMessage);
         }
     });
 });
