@@ -22,7 +22,7 @@ cd camera1_version1
 
 ### 2\. Create Virtual Environment and Install Dependencies
 
-Create a virtual environment that has access to the system's site packages. This is useful for accessing system-wide libraries like `picamera2` and `OpenCV` if they are already installed on the Raspberry Pi.
+Create a virtual environment that has access to the system's site packages.
 
 ```bash
 # Create the virtual environment
@@ -35,13 +35,35 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+> **Note:** If you encounter a `numpy.dtype size changed` error after this step, please see the **Troubleshooting** section below.
+
 ### 3\. Set Up the Application Service
 
-For the application to run on boot and for the restart buttons to work correctly, it must be run as a `systemd` service. Follow the detailed instructions in the "Running as a Service (Production)" section below.
+For the application to run on boot, it must be run as a `systemd` service. Follow the detailed instructions in the "Running as a Service (Production)" section below.
 
 ### 4\. Access the Web Interface
 
 Once the service is running, open a web browser and navigate to `http://<your-raspberry-pi-ip>:5000`.
+
+-----
+
+## Troubleshooting
+
+### `ValueError: numpy.dtype size changed`
+
+This error can occur after installing dependencies because of a conflict between the system's pre-compiled libraries (like `picamera2`) and the version of `numpy` installed by `pip`.
+
+To fix this, run the following commands inside your activated virtual environment:
+
+```bash
+# 1. Uninstall the conflicting libraries to ensure a clean state
+pip uninstall picamera2 simplejpeg numpy
+
+# 2. Reinstall picamera2, forcing it to be re-compiled from source
+pip install --no-cache-dir --no-binary :all: picamera2
+```
+
+This will rebuild the libraries against the correct version of NumPy in your environment, resolving the conflict.
 
 -----
 
@@ -51,14 +73,14 @@ Follow these steps to set up and run the application as a background service tha
 
 ### Step 1: Create the Startup Script
 
-Create a shell script named `start.sh` in your project's root directory (`/home/sakiv/projects/camera1_version1/`). This script will activate the virtual environment and start the Gunicorn server.
+Create a shell script named `start.sh` in your project's root directory (`/home/sakiv/projects/camera1_version1/`).
 
 **File: `start.sh`**
 
 ```bash
 #!/bin/bash
 cd /home/sakiv/projects/camera1_version1
-source venv/bin/activate
+source veni/bin/activate
 exec gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5000 app:app
 ```
 
@@ -78,7 +100,7 @@ Create a new service definition file for `systemd`.
 sudo nano /etc/systemd/system/camera_app.service
 ```
 
-Paste the following content into the editor. This file tells the system that the user `sakiv` will run the `start.sh` script.
+Paste the following content into the editor.
 
 **File: `camera_app.service`**
 
@@ -101,7 +123,7 @@ WantedBy=multi-user.target
 
 ### Step 3: Grant Sudo Privileges
 
-To allow the "Restart App" and "Restart System" buttons to work from the web UI, you must grant the `sakiv` user passwordless `sudo` access for only those specific commands.
+To allow the "Restart App" and "Restart System" buttons to work, grant the `sakiv` user passwordless `sudo` access for the required commands.
 
 **Command:**
 
@@ -139,7 +161,7 @@ sudo systemctl status camera_app.service
 
 ## Development Mode
 
-To run the app directly for development or debugging (without using the `systemd` service):
+To run the app directly for development or debugging:
 
 ```bash
 # First, ensure the service is stopped
