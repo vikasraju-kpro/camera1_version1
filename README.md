@@ -1,3 +1,4 @@
+````markdown
 # Fisheye Camera Control (camera1_version1)
 
 This project provides a web interface to control a single fisheye camera on a Raspberry Pi.
@@ -10,58 +11,146 @@ This project provides a web interface to control a single fisheye camera on a Ra
 -   Restart the web application.
 -   Restart the Raspberry Pi.
 
+---
 ## Setup
 
-1.  **Clone the repository:**
+### 1. Clone the Repository
+```bash
+git clone <your-repo-url>
+cd camera1_version1
+````
 
-    ```bash
-    git clone <your-repo-url>
-    cd camera1_version1
-    ```
+### 2\. Create Virtual Environment and Install Dependencies
 
-2.  **Create Virtual Environment and Install Dependencies:**
+Create a virtual environment that has access to the system's site packages. This is useful for accessing system-wide libraries like `picamera2` and `OpenCV` if they are already installed on the Raspberry Pi.
 
-    Create a virtual environment that has access to the system's site packages. This is useful for accessing system-wide libraries like `picamera2` and `OpenCV` if they are already installed on the Raspberry Pi.
+```bash
+# Create the virtual environment
+python3 -m venv --system-site-packages venv
 
-    ```bash
-    # Create the virtual environment
-    python3 -m venv --system-site-packages venv
+# Activate the virtual environment
+source venv/bin/activate
 
-    # Activate the virtual environment
-    source venv/bin/activate
+# Install any remaining dependencies
+pip install -r requirements.txt
+```
 
-    # Install any remaining dependencies
-    pip install -r requirements.txt
-    ```
+### 3\. Set Up the Application Service
 
-3.  **Run the Application as a Service:**
+For the application to run on boot and for the restart buttons to work correctly, it must be run as a `systemd` service. Follow the detailed instructions in the "Running as a Service (Production)" section below.
 
-    For the application to run on boot and for the restart buttons to work correctly, it should be run as a `systemd` service. Follow the instructions in the "Running as a Service" section below.
+### 4\. Access the Web Interface
 
-4.  **Access the Web Interface:**
+Once the service is running, open a web browser and navigate to `http://<your-raspberry-pi-ip>:5000`.
 
-    Open a web browser and navigate to `http://<your-raspberry-pi-ip>:5000`.
+-----
 
 ## Running as a Service (Production)
 
-1.  Ensure the `start.sh` script in the project directory is executable (`chmod +x start.sh`).
-2.  Create and enable the `camera_app.service` file as instructed previously.
-3.  Start the service:
-    ```bash
-    sudo systemctl start camera_app.service
-    ```
-4.  Check its status:
-    ```bash
-    sudo systemctl status camera_app.service
-    ```
+Follow these steps to set up and run the application as a background service that starts on boot.
+
+### Step 1: Create the Startup Script
+
+Create a shell script named `start.sh` in your project's root directory (`/home/sakiv/projects/camera1_version1/`). This script will activate the virtual environment and start the Gunicorn server.
+
+**File: `start.sh`**
+
+```bash
+#!/bin/bash
+cd /home/sakiv/projects/camera1_version1
+source venv/bin/activate
+exec gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5000 app:app
+```
+
+After creating the file, **make it executable**:
+
+```bash
+chmod +x start.sh
+```
+
+### Step 2: Create the systemd Service File
+
+Create a new service definition file for `systemd`.
+
+**Command:**
+
+```bash
+sudo nano /etc/systemd/system/camera_app.service
+```
+
+Paste the following content into the editor. This file tells the system that the user `sakiv` will run the `start.sh` script.
+
+**File: `camera_app.service`**
+
+```ini
+[Unit]
+Description=Gunicorn instance to serve the Camera Control application
+After=network.target
+
+[Service]
+User=sakiv
+Group=www-data
+WorkingDirectory=/home/sakiv/projects/camera1_version1
+ExecStart=/home/sakiv/projects/camera1_version1/start.sh
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Step 3: Grant Sudo Privileges
+
+To allow the "Restart App" and "Restart System" buttons to work from the web UI, you must grant the `sakiv` user passwordless `sudo` access for only those specific commands.
+
+**Command:**
+
+```bash
+sudo visudo
+```
+
+Scroll to the bottom of the file and add these two lines:
+
+```
+# Allow the sakiv user to restart the camera service and reboot the system without a password
+sakiv ALL=(ALL) NOPASSWD: /bin/systemctl restart camera_app.service
+sakiv ALL=(ALL) NOPASSWD: /sbin/reboot
+```
+
+### Step 4: Enable and Run the Service
+
+Finally, load, enable, and start your new service.
+
+```bash
+# Reload the systemd daemon to recognize the new service file
+sudo systemctl daemon-reload
+
+# Enable the service to start automatically on boot
+sudo systemctl enable camera_app.service
+
+# Start the service now
+sudo systemctl start camera_app.service
+
+# Check the status to ensure it's running correctly
+sudo systemctl status camera_app.service
+```
+
+-----
 
 ## Development Mode
 
-To run the app directly for development or debugging (without using the service):
+To run the app directly for development or debugging (without using the `systemd` service):
 
 ```bash
+# First, ensure the service is stopped
+sudo systemctl stop camera_app.service
+
 # Make sure your virtual environment is active
 source venv/bin/activate
 
-# Run the app with Gunicorn
-gunicorn --threads 4 --workers 1 --bind 0.0.0.0:5000 app:app
+# Run the app directly with Python's development server
+python3 app.py
+```
+
+```
+```
