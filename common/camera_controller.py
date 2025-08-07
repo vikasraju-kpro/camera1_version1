@@ -1,23 +1,23 @@
 import os
 import threading
 import time
-import cv2
-import subprocess as sp
+import subprocess
 from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder
 
 # --- Camera Configuration ---
 FISHEYE_CAM_ID = 0
-VIDEO_WIDTH = 1280
-VIDEO_HEIGHT = 720
+VIDEO_WIDTH = 1920
+VIDEO_HEIGHT = 1080
+VIDEO_FRAMERATE = 47.57
 
 # --- Global Variables ---
 picam = None
-actual_video_fps = 30
 recording_active = False
 recording_thread = None
 stop_recording_event = threading.Event()
-ffmpeg_process = None
-output_path = None
+output_path = None # Final .mp4 path
+temp_raw_path = None # Temporary .h264 path
 lock = threading.Lock()
 
 
@@ -28,23 +28,20 @@ def get_recording_status():
 
 
 def initialize_camera():
-    """Initializes and configures the fisheye camera."""
-    global picam, actual_video_fps
+    """Initializes and configures the fisheye camera with the desired framerate."""
+    global picam
     print("--- Initializing Fisheye Camera ---")
     try:
         picam = Picamera2(camera_num=FISHEYE_CAM_ID)
+        # Create a configuration with the specified resolution and framerate
         config = picam.create_video_configuration(
-            main={"size": (VIDEO_WIDTH, VIDEO_HEIGHT)}
+            main={"size": (VIDEO_WIDTH, VIDEO_HEIGHT)},
+            controls={"FrameRate": VIDEO_FRAMERATE}
         )
         picam.configure(config)
-        try:
-            actual_video_fps = picam.video_configuration['controls']['FrameRate']
-            print(f"Camera configured with actual frame rate: {actual_video_fps} FPS")
-        except (KeyError, TypeError):
-            print(f"Could not determine actual frame rate, falling back to default {actual_video_fps} FPS.")
         picam.start()
         time.sleep(2.0)
-        print("Fisheye camera started successfully.")
+        print(f"Fisheye camera started successfully at {VIDEO_FRAMERATE} FPS.")
         return True
     except Exception as e:
         print(f"ERROR: Failed to initialize camera: {e}")
@@ -52,7 +49,7 @@ def initialize_camera():
 
 
 def capture_image(filepath):
-    """Captures a single still image and saves it with correct RGB colors."""
+    """Captures a single still image and saves it."""
     global picam
     with lock:
         if recording_active:
@@ -61,18 +58,10 @@ def capture_image(filepath):
             return False, "Camera is not ready."
 
         try:
-            # Picamera2 provides a BGR-based array (often with an alpha channel)
-            array_bgra = picam.capture_array("main")
-            
-            # For saving a standard image file, cv2.imwrite needs a 3-channel BGR array.
-            # This conversion will result in a correctly colored JPG/PNG file.
-            if array_bgra.shape[2] == 4:
-                save_array = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2RGB)
-            else:
-                save_array = array_bgra # It's already BGR
-            
-            cv2.imwrite(filepath, save_array)
-            print(f"Image saved to {filepath} with correct colors.")
+            # Capture the image and save it directly.
+            # Picamera2 handles the color conversion correctly for still captures.
+            picam.capture_file(filepath)
+            print(f"Image saved to {filepath}")
             return True, "Image captured successfully."
         except Exception as e:
             print(f"ERROR: Failed to capture image: {e}")
@@ -80,36 +69,19 @@ def capture_image(filepath):
 
 
 def _record_video_loop():
-    """The thread target function that pipes BGR frames to FFmpeg."""
-    global picam, ffmpeg_process, stop_recording_event
-    print("Recording thread started. Piping BGR frames to FFmpeg...")
-
-    while not stop_recording_event.is_set():
-        try:
-            array_bgra = picam.capture_array("main")
-            
-            # The most stable method is to give FFmpeg the BGR data
-            # it expects based on our command. Convert from 4-channel BGRA to 3-channel BGR.
-            if array_bgra.shape[2] == 4:
-                frame_rgb = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2RGB)
-            else:
-                frame_rgb = array_bgra
-
-            ffmpeg_process.stdin.write(frame_rgb.tobytes())
-        except Exception as e:
-            if stop_recording_event.is_set():
-                print("Recording stopped, exiting loop.")
-                break
-            print(f"ERROR in recording loop while writing to FFmpeg pipe: {e}")
-            time.sleep(0.5)
-
+    """
+    A simple thread target that just waits for the stop signal.
+    The actual recording is handled by the Picamera2 encoder in the background.
+    """
+    print("Recording thread started. Waiting for stop signal...")
+    stop_recording_event.wait() # This will block until stop_recording() is called
     print("Recording thread finished.")
 
 
 def start_recording(filepath):
-    """Starts recording by launching an FFmpeg subprocess that expects BGR frames."""
+    """Starts recording a raw H264 stream to a temporary file."""
     global recording_active, recording_thread, stop_recording_event
-    global ffmpeg_process, output_path, actual_video_fps
+    global output_path, temp_raw_path
 
     with lock:
         if recording_active:
@@ -118,64 +90,77 @@ def start_recording(filepath):
             return False, "Camera is not ready."
 
         try:
+            # Set up file paths
             output_path = filepath
-            # This command tells FFmpeg to expect BGR data (`bgr24`) and
-            # it will correctly handle the conversion to the standard YUV format for MP4,
-            # resulting in correct colors in any video player.
-            command = [
-                'ffmpeg',
-                '-y',
-                '-f', 'rawvideo',
-                '-vcodec', 'rawvideo',
-                '-pix_fmt', 'bgr24',
-                '-s', f'{VIDEO_WIDTH}x{VIDEO_HEIGHT}',
-                '-r', str(actual_video_fps),
-                '-i', '-',
-                '-an',
-                '-vcodec', 'libx264',
-                '-pix_fmt', 'yuv420p', # Standard for video playback compatibility
-                output_path
-            ]
-            print(f"Starting FFmpeg with command: {' '.join(command)}")
-            ffmpeg_process = sp.Popen(command, stdin=sp.PIPE, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+            # Create a temporary filename for the raw stream
+            temp_raw_path = filepath.replace('.mp4', '.h264')
+
+            encoder = H264Encoder()
             stop_recording_event.clear()
+            
+            # Start the encoder. This is a non-blocking call.
+            picam.start_encoder(encoder, output=temp_raw_path)
+            
             recording_active = True
             recording_thread = threading.Thread(target=_record_video_loop, daemon=True)
             recording_thread.start()
-            print(f"Started recording to {output_path}")
+            
+            print(f"Started raw recording to {temp_raw_path}")
             return True, "Video recording started."
         except Exception as e:
-            print(f"ERROR starting FFmpeg recording: {e}")
+            print(f"ERROR starting raw recording: {e}")
             return False, f"Failed to start recording: {e}"
 
 
 def stop_recording():
-    """Stops recording by signaling the thread and closing the FFmpeg process."""
-    global recording_active, recording_thread, stop_recording_event, ffmpeg_process, output_path
+    """Stops the H264 recording and converts the raw file to a playable MP4."""
+    global recording_active, recording_thread, stop_recording_event, output_path, temp_raw_path
 
     with lock:
         if not recording_active:
             return False, "No active recording to stop.", None
-        print("Stopping recording...")
+        print("Stopping raw recording...")
+        
+        # Stop the encoder first
+        picam.stop_encoder()
+        
+        # Signal the waiting thread to exit
         stop_recording_event.set()
         recording_active = False
 
     if recording_thread:
-        recording_thread.join(timeout=5)
-        if recording_thread.is_alive():
-            print("WARN: Frame-feeding thread did not stop cleanly.")
+        recording_thread.join(timeout=2) # Wait for the thread to finish
 
-    if ffmpeg_process:
-        try:
-            ffmpeg_process.stdin.close()
-            ffmpeg_process.wait(timeout=10)
-            print(f"FFmpeg process finished with code: {ffmpeg_process.returncode}")
-        except Exception as e:
-            print(f"Error while closing FFmpeg process: {e}")
-            ffmpeg_process.kill()
+    print(f"\nConverting {temp_raw_path} to {output_path}...")
+    
+    # Construct the ffmpeg command to repackage the raw stream into an MP4
+    command = [
+        'ffmpeg',
+        '-y',                         # Overwrite output file if it exists
+        '-framerate', str(VIDEO_FRAMERATE), # Tell ffmpeg the input stream's FPS
+        '-i', temp_raw_path,
+        '-c:v', 'copy',               # Copy the video stream without re-encoding
+        '-r', str(VIDEO_FRAMERATE),   # Explicitly set the output file's FPS metadata
+        output_path
+    ]
 
-    print(f"Stopped recording. Video saved to {output_path}")
-    return True, "Video recording stopped.", output_path
+    try:
+        # Run the ffmpeg command
+        subprocess.run(command, check=True)
+        print("✅ Conversion successful!")
+        
+        # --- Clean up the temporary raw file ---
+        print(f"Removing temporary file: {temp_raw_path}")
+        os.remove(temp_raw_path)
+
+        return True, "Video recording stopped and file converted.", output_path
+
+    except FileNotFoundError:
+        print("❌ ERROR: ffmpeg is not installed or not in your PATH.")
+        return False, "ffmpeg not found. Cannot convert video.", None
+    except subprocess.CalledProcessError as e:
+        print(f"❌ ERROR: ffmpeg conversion failed with error: {e}")
+        return False, "Video conversion failed.", None
 
 
 def cleanup():

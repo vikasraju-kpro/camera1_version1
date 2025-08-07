@@ -74,7 +74,6 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/device_status');
             const data = await response.json();
-            // Display the new detailed status message using device_id
             const statusMessage = `${data.name} (ID: ${data.device_id}) | Status: ${data.message}`;
             updateStatus(statusMessage, false);
         } catch (error) {
@@ -128,8 +127,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.error) {
                 updateStatus(`Error: ${data.details}`, true);
             } else {
-                // Display the new health report including the device_id
-                const report = `Device ID: ${data.device_id} | CPU: ${data.cpu_usage_percent}% | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
+                // Build the health report string, now including the temperature
+                let report = `Device ID: ${data.device_id} | CPU: ${data.cpu_usage_percent}% | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
+                // Add temperature if it exists in the response
+                if (data.cpu_temperature_c !== null) {
+                    report += ` | Temp: ${data.cpu_temperature_c}°C`;
+                }
                 updateStatus(report, false);
             }
         } catch (error) {
@@ -147,7 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
     restartSystemBtn.addEventListener('click', async () => {
         if (confirm('Are you sure you want to restart the system? This will disconnect you.')) {
             const result = await apiPost('/restart_system');
-            // Display the device_id in the restart message
             const statusMessage = `${result.message} (ID: ${result.device_id})`;
             updateStatus(statusMessage);
         }
