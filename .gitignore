@@ -33,6 +33,11 @@ ENV/
 env.bak/
 venv.bak/
 
-# Static files
+# Static files for captures and recordings
 static/captures/
 static/recordings/
+
+# New directories for calibration and testing
+static/calibration_images/
+static/uploads/
+calibration_data/

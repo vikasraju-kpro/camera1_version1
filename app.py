@@ -1,6 +1,8 @@
 import datetime
 import os
-from flask import Flask, render_template, jsonify, url_for
+import glob
+from flask import Flask, render_template, jsonify, url_for, request
+
 from common.camera_controller import (
     initialize_camera,
     capture_image,
@@ -9,6 +11,7 @@ from common.camera_controller import (
     cleanup,
     get_recording_status,
 )
+from common import calibration_controller
 from common.system_controller import restart_app, restart_system
 from utils.health_check import get_health_report
 from utils.device_info import get_device_uuid, get_device_name
@@ -18,6 +21,9 @@ app = Flask(__name__)
 # --- Configuration ---
 OUTPUT_DIR_IMAGES = "static/captures"
 OUTPUT_DIR_VIDEOS = "static/recordings"
+OUTPUT_DIR_CALIB_IMAGES = "static/calibration_images"
+OUTPUT_DIR_UPLOADS = "static/uploads"
+CALIB_DATA_DIR = "calibration_data"
 IMAGE_EXTENSION = ".jpg"
 VIDEO_EXTENSION = ".mp4"
 
@@ -25,6 +31,9 @@ VIDEO_EXTENSION = ".mp4"
 print("--- Initializing Application ---")
 os.makedirs(OUTPUT_DIR_IMAGES, exist_ok=True)
 os.makedirs(OUTPUT_DIR_VIDEOS, exist_ok=True)
+os.makedirs(OUTPUT_DIR_CALIB_IMAGES, exist_ok=True)
+os.makedirs(OUTPUT_DIR_UPLOADS, exist_ok=True)
+os.makedirs(CALIB_DATA_DIR, exist_ok=True)
 initialize_camera()
 # --- End Application Startup ---
 
@@ -33,6 +42,12 @@ initialize_camera()
 def index():
     """Renders the main HTML page."""
     return render_template("index.html")
+
+
+@app.route("/calibration")
+def calibration_page():
+    """Renders the calibration HTML page."""
+    return render_template("calibration.html")
 
 
 @app.route("/capture_image", methods=["POST"])
@@ -72,6 +87,102 @@ def stop_recording_route():
         return jsonify({"success": False, "message": message}), 500
 
 
+@app.route("/capture_for_calibration", methods=["POST"])
+def capture_for_calibration_route():
+    """Captures an image, checks for a checkerboard, and returns the result."""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"calib_{timestamp}{IMAGE_EXTENSION}"
+    filepath = os.path.join(OUTPUT_DIR_CALIB_IMAGES, filename)
+    
+    capture_success, message = capture_image(filepath)
+    if not capture_success:
+        return jsonify({"success": False, "message": message}), 500
+
+    found, message, image_path = calibration_controller.find_checkerboard_in_image(filepath)
+    
+    image_filename = os.path.basename(image_path)
+    image_url = url_for('static', filename=f'calibration_images/{image_filename}')
+
+    return jsonify({
+        "success": found,
+        "message": message,
+        "preview_url": image_url
+    })
+
+
+@app.route("/get_calibration_status", methods=["GET"])
+def get_calibration_status_route():
+    """Returns the number of successfully captured calibration images."""
+    previews = glob.glob(os.path.join(OUTPUT_DIR_CALIB_IMAGES, '*_preview.jpg'))
+    image_count = len(previews)
+    return jsonify({
+        "image_count": image_count,
+        "min_required": calibration_controller.MIN_IMAGES_REQUIRED,
+        "is_ready": image_count >= calibration_controller.MIN_IMAGES_REQUIRED
+    })
+
+
+@app.route("/run_calibration", methods=["POST"])
+def run_calibration_route():
+    """Triggers the calibration process and returns a JSON response."""
+    success, message = calibration_controller.run_calibration_process()
+    return jsonify({"success": success, "message": message})
+
+
+@app.route("/upload_and_undistort", methods=["POST"])
+def upload_and_undistort_route():
+    """
+    Handles video upload, performs full undistortion for web playback, and returns a video URL.
+    """
+    if 'video' not in request.files:
+        return jsonify({"success": False, "message": "No video file provided."}), 400
+    
+    file = request.files['video']
+    if file.filename == '':
+        return jsonify({"success": False, "message": "No selected file."}), 400
+
+    upload_path = os.path.join(OUTPUT_DIR_UPLOADS, file.filename)
+    file.save(upload_path)
+    
+    success, message, result_filename = calibration_controller.undistort_video(upload_path)
+    
+    if success:
+        return jsonify({
+            "success": True,
+            "message": message,
+            "video_url": url_for('static', filename=f'uploads/{result_filename}')
+        })
+    else:
+        return jsonify({"success": False, "message": message}), 500
+
+
+@app.route("/quick_undistort_and_download", methods=["POST"])
+def quick_undistort_route():
+    """
+    Handles video upload, performs fast undistortion, and returns a download link.
+    """
+    if 'video' not in request.files:
+        return jsonify({"success": False, "message": "No video file provided."}), 400
+    
+    file = request.files['video']
+    if file.filename == '':
+        return jsonify({"success": False, "message": "No selected file."}), 400
+
+    upload_path = os.path.join(OUTPUT_DIR_UPLOADS, file.filename)
+    file.save(upload_path)
+    
+    success, message, result_filename = calibration_controller.quick_undistort_video(upload_path)
+    
+    if success:
+        return jsonify({
+            "success": True,
+            "message": message,
+            "download_url": url_for('static', filename=f'uploads/{result_filename}')
+        })
+    else:
+        return jsonify({"success": False, "message": message}), 500
+
+
 @app.route("/device_status", methods=["GET"])
 def device_status_route():
     """Endpoint to get the current recording status, device name, and device_id."""
@@ -83,7 +194,7 @@ def device_status_route():
     
     return jsonify({
         "name": get_device_name(),
-        "device_id": get_device_uuid(), # Changed from "UUID"
+        "device_id": get_device_uuid(), 
         "recording": is_recording, 
         "message": status_message
     })
@@ -104,12 +215,12 @@ def restart_app_route():
 
 @app.route("/restart_system", methods=["POST"])
 def restart_system_route():
-    """Endpoint to restart the Raspberry Pi, including the device_id in the response."""
+    """Endpoint to restart the Raspberry Pi."""
     restart_system()
     return jsonify({
         "success": True, 
         "message": "System is restarting.",
-        "device_id": get_device_uuid() # Changed from "UUID" for consistency
+        "device_id": get_device_uuid() 
     })
 
 

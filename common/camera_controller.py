@@ -58,7 +58,6 @@ def capture_image(filepath):
             return False, "Camera is not ready."
 
         try:
-            # Capture the image and save it directly.
             # Picamera2 handles the color conversion correctly for still captures.
             picam.capture_file(filepath)
             print(f"Image saved to {filepath}")
