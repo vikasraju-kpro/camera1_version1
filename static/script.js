@@ -1,134 +1,136 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Element Selectors ---
+    // --- Element Selectors for Main Page ---
     const statusDiv = document.getElementById('status');
-    const captureCalibBtn = document.getElementById('captureCalibBtn');
-    const runCalibBtn = document.getElementById('runCalibBtn');
-    const testUndistortBtn = document.getElementById('testUndistortBtn');
-    const videoUploadInput = document.getElementById('videoUpload');
-    const imageCountSpan = document.getElementById('imageCount');
-    const calibOutputDiv = document.getElementById('calib-output');
-    const testOutputDiv = document.getElementById('test-output');
-    const minImagesRequired = 15;
+    const captureBtn = document.getElementById('captureBtn');
+    const startRecordBtn = document.getElementById('startRecordBtn');
+    const stopRecordBtn = document.getElementById('stopRecordBtn');
+    const statusBtn = document.getElementById('statusBtn');
+    const healthBtn = document.getElementById('healthBtn');
+    const restartAppBtn = document.getElementById('restartAppBtn');
+    const restartSystemBtn = document.getElementById('restartSystemBtn');
+    const mediaOutputDiv = document.getElementById('media-output');
 
     // --- Helper Functions ---
     function updateStatus(message, isError = false) {
         statusDiv.textContent = message;
         statusDiv.style.color = isError ? '#dc3545' : '#198754';
+        statusDiv.style.backgroundColor = isError ? '#f8d7da' : '#d1e7dd';
     }
 
-    function displayPreviewImage(url) {
-        calibOutputDiv.innerHTML = '';
+    function displayImage(url) {
+        mediaOutputDiv.innerHTML = ''; // Clear previous output
         const img = document.createElement('img');
         img.src = url + '?t=' + new Date().getTime(); // Bust cache
-        img.alt = 'Calibration Preview';
-        calibOutputDiv.appendChild(img);
+        img.alt = 'Captured Image';
+        
+        const downloadLink = createDownloadLink(url, 'Download Image');
+        mediaOutputDiv.appendChild(img);
+        mediaOutputDiv.appendChild(downloadLink);
     }
 
-    function displayTestVideo(url) {
-        testOutputDiv.innerHTML = '';
+    function displayVideo(url) {
+        mediaOutputDiv.innerHTML = ''; // Clear previous output
         const video = document.createElement('video');
-        video.src = url + '?t=' + new Date().getTime();
+        video.src = url;
         video.controls = true;
         video.autoplay = true;
-        video.muted = true;
+        video.muted = true; // Autoplay often requires video to be muted
 
-        const downloadLink = document.createElement('a');
-        downloadLink.href = url;
-        downloadLink.textContent = 'Download Processed Video';
-        downloadLink.className = 'download-button';
-        downloadLink.download = url.substring(url.lastIndexOf('/') + 1);
-
-        testOutputDiv.appendChild(video);
-        testOutputDiv.appendChild(downloadLink);
+        const downloadLink = createDownloadLink(url, 'Download Video');
+        mediaOutputDiv.appendChild(video);
+        mediaOutputDiv.appendChild(downloadLink);
+    }
+    
+    function createDownloadLink(url, text) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.textContent = text;
+        a.className = 'download-button';
+        a.download = url.substring(url.lastIndexOf('/') + 1);
+        return a;
     }
 
-    async function updateImageCount() {
+    // --- Event Listeners for Main Page ---
+    captureBtn.addEventListener('click', async () => {
+        updateStatus('Capturing image...');
         try {
-            const response = await fetch('/get_calibration_status');
+            const response = await fetch('/capture_image', { method: 'POST' });
+            const result = await response.json();
+            updateStatus(result.message, !result.success);
+            if (result.success && result.image_url) {
+                displayImage(result.image_url);
+            }
+        } catch (error) {
+            updateStatus('A network error occurred.', true);
+        }
+    });
+
+    startRecordBtn.addEventListener('click', async () => {
+        updateStatus('Starting recording...');
+        try {
+            const response = await fetch('/start_recording', { method: 'POST' });
+            const result = await response.json();
+            updateStatus(result.message, !result.success);
+            if (result.success) {
+                startRecordBtn.disabled = true;
+                stopRecordBtn.disabled = false;
+            }
+        } catch (error) {
+            updateStatus('A network error occurred.', true);
+        }
+    });
+
+    stopRecordBtn.addEventListener('click', async () => {
+        updateStatus('Stopping recording and processing video...');
+        try {
+            const response = await fetch('/stop_recording', { method: 'POST' });
+            const result = await response.json();
+            updateStatus(result.message, !result.success);
+            if (result.success) {
+                startRecordBtn.disabled = false;
+                stopRecordBtn.disabled = true;
+                if (result.video_url) {
+                    displayVideo(result.video_url);
+                }
+            }
+        } catch (error) {
+            updateStatus('A network error occurred.', true);
+        }
+    });
+
+    statusBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/device_status');
             const data = await response.json();
-            imageCountSpan.textContent = data.image_count;
-            if (data.is_ready) {
-                runCalibBtn.disabled = false;
-                imageCountSpan.style.color = '#198754'; // Green
-            } else {
-                runCalibBtn.disabled = true;
-                imageCountSpan.style.color = '#0d6efd'; // Blue
-            }
+            const statusMessage = `Device: ${data.name} (ID: ${data.device_id}) - Status: ${data.message}`;
+            updateStatus(statusMessage);
         } catch (error) {
-            console.error("Failed to get image count:", error);
+            updateStatus('Failed to get device status.', true);
         }
-    }
-
-    // --- Event Listeners ---
-    captureCalibBtn.addEventListener('click', async () => {
-        updateStatus('Capturing image and searching for checkerboard...');
-        captureCalibBtn.disabled = true;
-        try {
-            const response = await fetch('/capture_for_calibration', { method: 'POST' });
-            const result = await response.json();
-            
-            // --- CHANGE ---
-            // Update status and display the image regardless of success
-            updateStatus(result.message, !result.success);
-            if (result.preview_url) {
-                displayPreviewImage(result.preview_url);
-            }
-
-            // Only update the count if the checkerboard was found
-            if (result.success) {
-                await updateImageCount();
-            }
-
-        } catch (error) {
-            updateStatus('Network error during capture.', true);
-        }
-        captureCalibBtn.disabled = false;
     });
 
-    runCalibBtn.addEventListener('click', async () => {
-        updateStatus('Running calibration... This may take a minute.');
-        runCalibBtn.disabled = true;
-        captureCalibBtn.disabled = true;
+    healthBtn.addEventListener('click', async () => {
         try {
-            const response = await fetch('/run_calibration', { method: 'POST' });
-            const result = await response.json();
-            updateStatus(result.message, !result.success);
+            const response = await fetch('/health_report');
+            const data = await response.json();
+            const report = `CPU: ${data.cpu_usage_percent}% | Temp: ${data.cpu_temperature_c}°C | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
+            updateStatus(report);
         } catch (error) {
-            updateStatus('Network error during calibration.', true);
+            updateStatus('Failed to get health report.', true);
         }
-        runCalibBtn.disabled = false;
-        captureCalibBtn.disabled = false;
     });
 
-    testUndistortBtn.addEventListener('click', async () => {
-        const file = videoUploadInput.files[0];
-        if (!file) {
-            updateStatus('Please select a video file to test.', true);
-            return;
+    restartAppBtn.addEventListener('click', async () => {
+        if (confirm('Are you sure you want to restart the application?')) {
+            updateStatus('Restarting application...');
+            await fetch('/restart_app', { method: 'POST' });
         }
-
-        updateStatus('Uploading and processing video... Please wait.');
-        testUndistortBtn.disabled = true;
-
-        const formData = new FormData();
-        formData.append('video', file);
-
-        try {
-            const response = await fetch('/upload_and_undistort', {
-                method: 'POST',
-                body: formData
-            });
-            const result = await response.json();
-            updateStatus(result.message, !result.success);
-            if (result.success) {
-                displayTestVideo(result.video_url);
-            }
-        } catch (error) {
-            updateStatus('Network error during video processing.', true);
-        }
-        testUndistortBtn.disabled = false;
     });
 
-    // --- Initial State ---
-    updateImageCount();
+    restartSystemBtn.addEventListener('click', async () => {
+        if (confirm('Are you sure you want to RESTART THE ENTIRE SYSTEM?')) {
+            updateStatus('Restarting system...');
+            await fetch('/restart_system', { method: 'POST' });
+        }
+    });
 });
