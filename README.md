@@ -80,7 +80,7 @@ Create a shell script named `start.sh` in your project's root directory (`/home/
 ```bash
 #!/bin/bash
 cd /home/sakiv/projects/camera1_version1
-source veni/bin/activate
+source venv/bin/activate
 exec gunicorn --workers 1 --threads 4 --bind 0.0.0.0:5000 app:app
 ```
 
