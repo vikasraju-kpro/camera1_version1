@@ -41,3 +41,6 @@ static/recordings/
 static/calibration_images/
 static/uploads/
 calibration_data/
+
+#files
+*.zip
