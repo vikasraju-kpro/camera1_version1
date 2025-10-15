@@ -9,11 +9,11 @@ from picamera2 import Picamera2
 FISHEYE_CAM_ID = 0
 VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
-TARGET_VIDEO_FPS = 30
+TARGET_VIDEO_FPS = 60
 
 # --- Global Variables ---
 picam = None
-actual_video_fps = 30
+actual_video_fps = 60
 recording_active = False
 recording_thread = None
 stop_recording_event = threading.Event()
