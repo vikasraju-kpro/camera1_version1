@@ -9,6 +9,7 @@ from picamera2 import Picamera2
 FISHEYE_CAM_ID = 0
 VIDEO_WIDTH = 1280
 VIDEO_HEIGHT = 720
+TARGET_VIDEO_FPS = 30
 
 # --- Global Variables ---
 picam = None
@@ -34,14 +35,22 @@ def initialize_camera():
     try:
         picam = Picamera2(camera_num=FISHEYE_CAM_ID)
         config = picam.create_video_configuration(
-            main={"size": (VIDEO_WIDTH, VIDEO_HEIGHT)}
+            main={"size": (VIDEO_WIDTH, VIDEO_HEIGHT)},
+            controls={"FrameRate": TARGET_VIDEO_FPS}
         )
         picam.configure(config)
         try:
-            actual_video_fps = picam.video_configuration['controls']['FrameRate']
-            print(f"Camera configured with actual frame rate: {actual_video_fps} FPS")
-        except (KeyError, TypeError):
-            print(f"Could not determine actual frame rate, falling back to default {actual_video_fps} FPS.")
+            # Best-effort: apply target FPS to the camera
+            picam.set_controls({"FrameRate": TARGET_VIDEO_FPS})
+        except Exception as e:
+            print(f"WARN: Unable to set camera FrameRate to {TARGET_VIDEO_FPS}: {e}")
+
+        try:
+            # Use configured or target FPS for encoding; avoid relying on undefined metadata
+            actual_video_fps = picam.video_configuration['controls'].get('FrameRate', TARGET_VIDEO_FPS)
+        except Exception:
+            actual_video_fps = TARGET_VIDEO_FPS
+        print(f"Camera configured target frame rate: {TARGET_VIDEO_FPS} FPS; using {actual_video_fps} FPS for encoding")
         picam.start()
         time.sleep(2.0)
         print("Fisheye camera started successfully.")
@@ -65,9 +74,9 @@ def capture_image(filepath):
             array_bgra = picam.capture_array("main")
             
             # For saving a standard image file, cv2.imwrite needs a 3-channel BGR array.
-            # This conversion will result in a correctly colored JPG/PNG file.
+            # Convert from BGRA to BGR when needed for correct color order.
             if array_bgra.shape[2] == 4:
-                save_array = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2RGB)
+                save_array = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2BGR)
             else:
                 save_array = array_bgra # It's already BGR
             
@@ -91,11 +100,11 @@ def _record_video_loop():
             # The most stable method is to give FFmpeg the BGR data
             # it expects based on our command. Convert from 4-channel BGRA to 3-channel BGR.
             if array_bgra.shape[2] == 4:
-                frame_rgb = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2RGB)
+                frame_bgr = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2BGR)
             else:
-                frame_rgb = array_bgra
+                frame_bgr = array_bgra
 
-            ffmpeg_process.stdin.write(frame_rgb.tobytes())
+            ffmpeg_process.stdin.write(frame_bgr.tobytes())
         except Exception as e:
             if stop_recording_event.is_set():
                 print("Recording stopped, exiting loop.")
@@ -118,6 +127,25 @@ def start_recording(filepath):
             return False, "Camera is not ready."
 
         try:
+            # Measure actual camera FPS briefly to match FFmpeg's input rate
+            measured_fps = None
+            try:
+                sample_frames = 20
+                t0 = time.time()
+                for _ in range(sample_frames):
+                    picam.capture_array("main")
+                t1 = time.time()
+                if t1 > t0:
+                    measured_fps = max(1.0, min(120.0, (sample_frames / (t1 - t0))))
+            except Exception as e:
+                print(f"WARN: Unable to measure camera FPS: {e}")
+
+            if measured_fps:
+                actual_video_fps = round(measured_fps, 2)
+            else:
+                # Fallback to configured/target FPS
+                actual_video_fps = actual_video_fps or TARGET_VIDEO_FPS
+
             output_path = filepath
             # This command tells FFmpeg to expect BGR data (`bgr24`) and
             # it will correctly handle the conversion to the standard YUV format for MP4,
