@@ -14,6 +14,8 @@ TARGET_VIDEO_FPS = 47
 # --- Global Variables ---
 picam = None
 actual_video_fps = 47
+capture_frame_width = None
+capture_frame_height = None
 recording_active = False
 recording_thread = None
 stop_recording_event = threading.Event()
@@ -57,6 +59,9 @@ def initialize_camera():
         try:
             probe = picam.capture_array("main")
             h, w = probe.shape[:2]
+            # Save probed capture size for FFmpeg raw input declaration
+            global capture_frame_width, capture_frame_height
+            capture_frame_width, capture_frame_height = w, h
             if (w, h) != (VIDEO_WIDTH, VIDEO_HEIGHT):
                 print(
                     f"WARN: Actual capture size is {w}x{h}, differs from configured {VIDEO_WIDTH}x{VIDEO_HEIGHT}"
@@ -65,6 +70,11 @@ def initialize_camera():
                 print(f"Verified capture size: {w}x{h}")
         except Exception as e:
             print(f"WARN: Could not probe frame size: {e}")
+        # Log negotiated configuration for deeper diagnostics
+        try:
+            print(f"Negotiated video configuration: {picam.video_configuration}")
+        except Exception as e:
+            print(f"WARN: Could not read video_configuration: {e}")
         print("Fisheye camera started successfully.")
         return True
     except Exception as e:
@@ -143,21 +153,24 @@ def start_recording(filepath):
             actual_video_fps = TARGET_VIDEO_FPS
 
             output_path = filepath
-            # This command tells FFmpeg to expect BGR data (`bgr24`) and
-            # it will correctly handle the conversion to the standard YUV format for MP4,
-            # resulting in correct colors in any video player.
+            # Determine raw input frame size from probe; fall back to configured size
+            input_w = capture_frame_width or VIDEO_WIDTH
+            input_h = capture_frame_height or VIDEO_HEIGHT
+            # Build FFmpeg command to accept raw BGR frames at probed size and
+            # enforce output size and framerate using filters and constant vsync.
             command = [
                 'ffmpeg',
                 '-y',
                 '-f', 'rawvideo',
                 '-vcodec', 'rawvideo',
                 '-pix_fmt', 'bgr24',
-                '-s', f'{VIDEO_WIDTH}x{VIDEO_HEIGHT}',
-                '-r', str(actual_video_fps),
+                '-s', f'{input_w}x{input_h}',
+                '-r', str(actual_video_fps), # declare input frame rate
                 '-i', '-',
                 '-an',
-                # Enforce constant output framerate to match configuration
-                '-r', str(actual_video_fps),
+                '-vsync', 'cfr',
+                '-vf', f'fps={actual_video_fps},scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=bicubic',
+                '-r', str(actual_video_fps), # set container/output frame rate
                 '-vcodec', 'libx264',
                 '-pix_fmt', 'yuv420p', # Standard for video playback compatibility
                 output_path
@@ -165,7 +178,7 @@ def start_recording(filepath):
             print(
                 "Starting FFmpeg with command: "
                 + ' '.join(command)
-                + f" | input_size={VIDEO_WIDTH}x{VIDEO_HEIGHT} input_fps={actual_video_fps} output_fps={actual_video_fps}"
+                + f" | input_size={input_w}x{input_h} input_fps={actual_video_fps} output_size={VIDEO_WIDTH}x{VIDEO_HEIGHT} output_fps={actual_video_fps}"
             )
             ffmpeg_process = sp.Popen(command, stdin=sp.PIPE, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
             stop_recording_event.clear()
