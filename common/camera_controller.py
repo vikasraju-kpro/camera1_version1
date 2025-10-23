@@ -45,14 +45,26 @@ def initialize_camera():
         except Exception as e:
             print(f"WARN: Unable to set camera FrameRate to {TARGET_VIDEO_FPS}: {e}")
 
-        try:
-            # Use configured or target FPS for encoding; avoid relying on undefined metadata
-            actual_video_fps = picam.video_configuration['controls'].get('FrameRate', TARGET_VIDEO_FPS)
-        except Exception:
-            actual_video_fps = TARGET_VIDEO_FPS
-        print(f"Camera configured target frame rate: {TARGET_VIDEO_FPS} FPS; using {actual_video_fps} FPS for encoding")
+        # Force encoding FPS to the configured target to keep output specs consistent
+        actual_video_fps = TARGET_VIDEO_FPS
+        print(
+            f"Camera configured: size={VIDEO_WIDTH}x{VIDEO_HEIGHT}, target_fps={TARGET_VIDEO_FPS}; "
+            f"encoding_fps={actual_video_fps}"
+        )
         picam.start()
         time.sleep(2.0)
+        # Probe one frame to verify actual capture dimensions
+        try:
+            probe = picam.capture_array("main")
+            h, w = probe.shape[:2]
+            if (w, h) != (VIDEO_WIDTH, VIDEO_HEIGHT):
+                print(
+                    f"WARN: Actual capture size is {w}x{h}, differs from configured {VIDEO_WIDTH}x{VIDEO_HEIGHT}"
+                )
+            else:
+                print(f"Verified capture size: {w}x{h}")
+        except Exception as e:
+            print(f"WARN: Could not probe frame size: {e}")
         print("Fisheye camera started successfully.")
         return True
     except Exception as e:
@@ -127,24 +139,8 @@ def start_recording(filepath):
             return False, "Camera is not ready."
 
         try:
-            # Measure actual camera FPS briefly to match FFmpeg's input rate
-            measured_fps = None
-            try:
-                sample_frames = 20
-                t0 = time.time()
-                for _ in range(sample_frames):
-                    picam.capture_array("main")
-                t1 = time.time()
-                if t1 > t0:
-                    measured_fps = max(1.0, min(120.0, (sample_frames / (t1 - t0))))
-            except Exception as e:
-                print(f"WARN: Unable to measure camera FPS: {e}")
-
-            if measured_fps:
-                actual_video_fps = round(measured_fps, 2)
-            else:
-                # Fallback to configured/target FPS
-                actual_video_fps = actual_video_fps or TARGET_VIDEO_FPS
+            # Use the configured target FPS for both input and output to FFmpeg
+            actual_video_fps = TARGET_VIDEO_FPS
 
             output_path = filepath
             # This command tells FFmpeg to expect BGR data (`bgr24`) and
@@ -160,11 +156,17 @@ def start_recording(filepath):
                 '-r', str(actual_video_fps),
                 '-i', '-',
                 '-an',
+                # Enforce constant output framerate to match configuration
+                '-r', str(actual_video_fps),
                 '-vcodec', 'libx264',
                 '-pix_fmt', 'yuv420p', # Standard for video playback compatibility
                 output_path
             ]
-            print(f"Starting FFmpeg with command: {' '.join(command)}")
+            print(
+                "Starting FFmpeg with command: "
+                + ' '.join(command)
+                + f" | input_size={VIDEO_WIDTH}x{VIDEO_HEIGHT} input_fps={actual_video_fps} output_fps={actual_video_fps}"
+            )
             ffmpeg_process = sp.Popen(command, stdin=sp.PIPE, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
             stop_recording_event.clear()
             recording_active = True
