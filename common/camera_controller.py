@@ -8,14 +8,11 @@ from picamera2 import Picamera2
 # --- Camera Configuration ---
 FISHEYE_CAM_ID = 0
 VIDEO_WIDTH = 1280
-VIDEO_HEIGHT = 960
-TARGET_VIDEO_FPS = 47
+VIDEO_HEIGHT = 720
 
 # --- Global Variables ---
 picam = None
-actual_video_fps = 47
-capture_frame_width = None
-capture_frame_height = None
+actual_video_fps = 30
 recording_active = False
 recording_thread = None
 stop_recording_event = threading.Event()
@@ -37,44 +34,16 @@ def initialize_camera():
     try:
         picam = Picamera2(camera_num=FISHEYE_CAM_ID)
         config = picam.create_video_configuration(
-            main={"size": (VIDEO_WIDTH, VIDEO_HEIGHT)},
-            controls={"FrameRate": TARGET_VIDEO_FPS}
+            main={"size": (VIDEO_WIDTH, VIDEO_HEIGHT)}
         )
         picam.configure(config)
         try:
-            # Best-effort: apply target FPS to the camera
-            picam.set_controls({"FrameRate": TARGET_VIDEO_FPS})
-        except Exception as e:
-            print(f"WARN: Unable to set camera FrameRate to {TARGET_VIDEO_FPS}: {e}")
-
-        # Force encoding FPS to the configured target to keep output specs consistent
-        actual_video_fps = TARGET_VIDEO_FPS
-        print(
-            f"Camera configured: size={VIDEO_WIDTH}x{VIDEO_HEIGHT}, target_fps={TARGET_VIDEO_FPS}; "
-            f"encoding_fps={actual_video_fps}"
-        )
+            actual_video_fps = picam.video_configuration['controls']['FrameRate']
+            print(f"Camera configured with actual frame rate: {actual_video_fps} FPS")
+        except (KeyError, TypeError):
+            print(f"Could not determine actual frame rate, falling back to default {actual_video_fps} FPS.")
         picam.start()
         time.sleep(2.0)
-        # Probe one frame to verify actual capture dimensions
-        try:
-            probe = picam.capture_array("main")
-            h, w = probe.shape[:2]
-            # Save probed capture size for FFmpeg raw input declaration
-            global capture_frame_width, capture_frame_height
-            capture_frame_width, capture_frame_height = w, h
-            if (w, h) != (VIDEO_WIDTH, VIDEO_HEIGHT):
-                print(
-                    f"WARN: Actual capture size is {w}x{h}, differs from configured {VIDEO_WIDTH}x{VIDEO_HEIGHT}"
-                )
-            else:
-                print(f"Verified capture size: {w}x{h}")
-        except Exception as e:
-            print(f"WARN: Could not probe frame size: {e}")
-        # Log negotiated configuration for deeper diagnostics
-        try:
-            print(f"Negotiated video configuration: {picam.video_configuration}")
-        except Exception as e:
-            print(f"WARN: Could not read video_configuration: {e}")
         print("Fisheye camera started successfully.")
         return True
     except Exception as e:
@@ -96,9 +65,9 @@ def capture_image(filepath):
             array_bgra = picam.capture_array("main")
             
             # For saving a standard image file, cv2.imwrite needs a 3-channel BGR array.
-            # Convert from BGRA to BGR when needed for correct color order.
+            # This conversion will result in a correctly colored JPG/PNG file.
             if array_bgra.shape[2] == 4:
-                save_array = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2BGR)
+                save_array = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2RGB)
             else:
                 save_array = array_bgra # It's already BGR
             
@@ -122,11 +91,11 @@ def _record_video_loop():
             # The most stable method is to give FFmpeg the BGR data
             # it expects based on our command. Convert from 4-channel BGRA to 3-channel BGR.
             if array_bgra.shape[2] == 4:
-                frame_bgr = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2BGR)
+                frame_rgb = cv2.cvtColor(array_bgra, cv2.COLOR_BGRA2RGB)
             else:
-                frame_bgr = array_bgra
+                frame_rgb = array_bgra
 
-            ffmpeg_process.stdin.write(frame_bgr.tobytes())
+            ffmpeg_process.stdin.write(frame_rgb.tobytes())
         except Exception as e:
             if stop_recording_event.is_set():
                 print("Recording stopped, exiting loop.")
@@ -149,37 +118,25 @@ def start_recording(filepath):
             return False, "Camera is not ready."
 
         try:
-            # Use the configured target FPS for both input and output to FFmpeg
-            actual_video_fps = TARGET_VIDEO_FPS
-
             output_path = filepath
-            # Determine raw input frame size from probe; fall back to configured size
-            input_w = capture_frame_width or VIDEO_WIDTH
-            input_h = capture_frame_height or VIDEO_HEIGHT
-            # Build FFmpeg command to accept raw BGR frames at probed size and
-            # enforce output size and framerate using filters and constant vsync.
+            # This command tells FFmpeg to expect BGR data (`bgr24`) and
+            # it will correctly handle the conversion to the standard YUV format for MP4,
+            # resulting in correct colors in any video player.
             command = [
                 'ffmpeg',
                 '-y',
                 '-f', 'rawvideo',
                 '-vcodec', 'rawvideo',
                 '-pix_fmt', 'bgr24',
-                '-s', f'{input_w}x{input_h}',
-                '-r', str(actual_video_fps), # declare input frame rate
+                '-s', f'{VIDEO_WIDTH}x{VIDEO_HEIGHT}',
+                '-r', str(actual_video_fps),
                 '-i', '-',
                 '-an',
-                '-vsync', 'cfr',
-                '-vf', f'fps={actual_video_fps},scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=bicubic',
-                '-r', str(actual_video_fps), # set container/output frame rate
                 '-vcodec', 'libx264',
                 '-pix_fmt', 'yuv420p', # Standard for video playback compatibility
                 output_path
             ]
-            print(
-                "Starting FFmpeg with command: "
-                + ' '.join(command)
-                + f" | input_size={input_w}x{input_h} input_fps={actual_video_fps} output_size={VIDEO_WIDTH}x{VIDEO_HEIGHT} output_fps={actual_video_fps}"
-            )
+            print(f"Starting FFmpeg with command: {' '.join(command)}")
             ffmpeg_process = sp.Popen(command, stdin=sp.PIPE, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
             stop_recording_event.clear()
             recording_active = True
