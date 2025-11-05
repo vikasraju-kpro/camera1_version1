@@ -1,6 +1,7 @@
 import datetime
 import os
 import glob
+import threading 
 from flask import Flask, render_template, jsonify, url_for, request, send_file
 
 from common.camera_controller import (
@@ -13,6 +14,8 @@ from common.camera_controller import (
 )
 from common import calibration_controller
 from common import file_manager 
+from common import inference_controller
+from common import homography_controller # <-- NEW
 from common.system_controller import restart_app, restart_system
 from utils.health_check import get_health_report
 from utils.device_info import get_device_uuid, get_device_name
@@ -25,9 +28,18 @@ OUTPUT_DIR_VIDEOS = "static/recordings"
 OUTPUT_DIR_CALIB_IMAGES = "static/calibration_images"
 OUTPUT_DIR_UPLOADS = "static/uploads"
 CALIB_DATA_DIR = "calibration_data"
+OUTPUT_DIR_LINE_CALLS = "static/line_calls"
+OUTPUT_DIR_INFERENCES = "static/line_call_inferences"
 IMAGE_EXTENSION = ".jpg"
 VIDEO_EXTENSION = ".mp4"
-DELETE_PIN = "kpro" # The PIN required to delete files
+DELETE_PIN = "kpro" 
+
+# --- Global variable for tracking inference task ---
+inference_status = {
+    "status": "idle", # "idle", "running", "complete", "error"
+    "output_url": None,
+    "message": None
+}
 
 # --- Application Startup ---
 print("--- Initializing Application ---")
@@ -36,31 +48,95 @@ os.makedirs(OUTPUT_DIR_VIDEOS, exist_ok=True)
 os.makedirs(OUTPUT_DIR_CALIB_IMAGES, exist_ok=True)
 os.makedirs(OUTPUT_DIR_UPLOADS, exist_ok=True)
 os.makedirs(CALIB_DATA_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR_LINE_CALLS, exist_ok=True)
+os.makedirs(OUTPUT_DIR_INFERENCES, exist_ok=True)
 initialize_camera()
 # --- End Application Startup ---
+
+
+# --- MODIFIED: Thread target function for running inference ---
+def run_inference_task(input_video_path):
+    """
+    This function runs in a separate thread.
+    It updates the global 'inference_status' variable.
+    NOW RUNS A 2-STAGE PIPELINE.
+    """
+    global inference_status
+    try:
+        filesystem_path = os.path.join(os.getcwd(), input_video_path.lstrip('/'))
+        
+        if not os.path.exists(filesystem_path):
+             raise FileNotFoundError(f"File not found at {filesystem_path}")
+
+        print(f"Starting TFLite inference thread for: {filesystem_path}")
+        
+        # --- STAGE 1: Run TFLite Shuttle Tracking ---
+        inference_status["message"] = "Stage 1/2: Running shuttle tracking..."
+        success_tflite, tflite_vid_path, tflite_csv_path = inference_controller.run_inference_on_video(
+            filesystem_path, 
+            OUTPUT_DIR_INFERENCES
+        )
+
+        if not success_tflite:
+            # tflite_vid_path is the error message in this case
+            raise Exception(f"TFLite inference failed: {tflite_vid_path}")
+
+        print(f"--- TFLite step complete. CSV at: {tflite_csv_path} ---")
+        print(f"--- Starting YOLO Homography step... ---")
+        
+        # --- STAGE 2: Run YOLO Homography ---
+        inference_status["message"] = "Stage 2/2: Running court detection..."
+        success_homog, homog_path_or_err = homography_controller.run_homography_check(
+            filesystem_path,     # Use the *original* video
+            tflite_csv_path,     # Use the CSV we just made
+            OUTPUT_DIR_INFERENCES
+        )
+
+        if not success_homog:
+            # homog_path_or_err is the error message
+            raise Exception(f"Homography check failed: {homog_path_or_err}")
+        
+        print(f"--- Homography step complete. Final video at: {homog_path_or_err} ---")
+
+        # --- STAGE 3: Set final status ---
+        # homog_path_or_err is the web-accessible path (e.g., "line_call_inferences/yolo_...mp4")
+        inference_status = {
+            "status": "complete",
+            "output_url": homog_path_or_err, # This is the web path from the homog script
+            "message": "Line calling process complete."
+        }
+        print(f"Inference thread finished: {inference_status['status']}")
+
+    except Exception as e:
+        print(f"❌ Inference thread failed with exception: {e}")
+        inference_status = {
+            "status": "error",
+            "output_url": None,
+            "message": str(e)
+        }
 
 
 # --- Page Rendering Routes ---
 @app.route("/")
 def index():
-    """Renders the main HTML page."""
     return render_template("index.html")
 
 @app.route("/calibration")
 def calibration_page():
-    """Renders the calibration HTML page."""
     return render_template("calibration.html")
 
 @app.route("/files")
 def file_explorer_page():
-    """Renders the file explorer HTML page."""
     return render_template("file_explorer.html")
+
+@app.route("/line_calling")
+def line_calling_page():
+    return render_template("line_calling.html")
 
 
 # --- Camera Control Routes ---
 @app.route("/capture_image", methods=["POST"])
 def capture_image_route():
-    """Endpoint to capture a still image."""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"capture_{timestamp}{IMAGE_EXTENSION}"
     filepath = os.path.join(OUTPUT_DIR_IMAGES, filename)
@@ -72,7 +148,6 @@ def capture_image_route():
 
 @app.route("/start_recording", methods=["POST"])
 def start_recording_route():
-    """Endpoint to start video recording."""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"recording_{timestamp}{VIDEO_EXTENSION}"
     filepath = os.path.join(OUTPUT_DIR_VIDEOS, filename)
@@ -84,7 +159,6 @@ def start_recording_route():
 
 @app.route("/stop_recording", methods=["POST"])
 def stop_recording_route():
-    """Endpoint to stop video recording."""
     success, message, video_path = stop_recording()
     if success:
         video_filename = os.path.basename(video_path)
@@ -92,62 +166,60 @@ def stop_recording_route():
     else:
         return jsonify({"success": False, "message": message}), 500
 
+@app.route("/start_line_calling", methods=["POST"])
+def start_line_calling_route():
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"line_call_{timestamp}{VIDEO_EXTENSION}"
+    filepath = os.path.join(OUTPUT_DIR_LINE_CALLS, filename)
+    success, message = start_recording(filepath)
+    if success:
+        return jsonify({"success": True, "message": message})
+    else:
+        return jsonify({"success": False, "message": message}), 500
+
+@app.route("/stop_line_calling", methods=["POST"])
+def stop_line_calling_route():
+    success, message, video_path = stop_recording()
+    if success:
+        video_filename = os.path.basename(video_path)
+        return jsonify({"success": True, "message": message, "video_url": url_for("static", filename=f"line_calls/{video_filename}")})
+    else:
+        return jsonify({"success": False, "message": message}), 500
+
 
 # --- Calibration and Undistortion Routes ---
 @app.route("/capture_for_calibration", methods=["POST"])
 def capture_for_calibration_route():
-    """Captures an image, checks for a checkerboard, and returns the result."""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"calib_{timestamp}{IMAGE_EXTENSION}"
     filepath = os.path.join(OUTPUT_DIR_CALIB_IMAGES, filename)
-    
     capture_success, message = capture_image(filepath)
     if not capture_success:
         return jsonify({"success": False, "message": message}), 500
-
     found, message, image_path = calibration_controller.find_checkerboard_in_image(filepath)
-    
     image_filename = os.path.basename(image_path)
     image_url = url_for('static', filename=f'calibration_images/{image_filename}')
-
-    return jsonify({
-        "success": found,
-        "message": message,
-        "preview_url": image_url
-    })
+    return jsonify({"success": found, "message": message, "preview_url": image_url})
 
 @app.route("/get_calibration_status", methods=["GET"])
 def get_calibration_status_route():
-    """Returns the number of successfully captured calibration images."""
     previews = glob.glob(os.path.join(OUTPUT_DIR_CALIB_IMAGES, '*_preview.jpg'))
     image_count = len(previews)
-    return jsonify({
-        "image_count": image_count,
-        "min_required": calibration_controller.MIN_IMAGES_REQUIRED,
-        "is_ready": image_count >= calibration_controller.MIN_IMAGES_REQUIRED
-    })
+    return jsonify({"image_count": image_count, "min_required": calibration_controller.MIN_IMAGES_REQUIRED, "is_ready": image_count >= calibration_controller.MIN_IMAGES_REQUIRED})
 
 @app.route("/run_calibration", methods=["POST"])
 def run_calibration_route():
-    """Triggers the calibration process and returns a JSON response."""
     success, message = calibration_controller.run_calibration_process()
     return jsonify({"success": success, "message": message})
 
 @app.route("/upload_and_undistort", methods=["POST"])
 def upload_and_undistort_route():
-    """Handles video upload, performs full undistortion for web playback."""
-    if 'video' not in request.files:
-        return jsonify({"success": False, "message": "No video file provided."}), 400
-    
+    if 'video' not in request.files: return jsonify({"success": False, "message": "No video file provided."}), 400
     file = request.files['video']
-    if file.filename == '':
-        return jsonify({"success": False, "message": "No selected file."}), 400
-
+    if file.filename == '': return jsonify({"success": False, "message": "No selected file."}), 400
     upload_path = os.path.join(OUTPUT_DIR_UPLOADS, file.filename)
     file.save(upload_path)
-    
     success, message, result_filename = calibration_controller.undistort_video(upload_path)
-    
     if success:
         return jsonify({"success": True, "message": message, "video_url": url_for('static', filename=f'uploads/{result_filename}')})
     else:
@@ -155,7 +227,22 @@ def upload_and_undistort_route():
 
 @app.route("/quick_undistort_and_download", methods=["POST"])
 def quick_undistort_route():
-    """Handles video upload, performs fast undistortion, and returns a download link."""
+    if 'video' not in request.files: return jsonify({"success": False, "message": "No video file provided."}), 400
+    file = request.files['video']
+    if file.filename == '': return jsonify({"success": False, "message": "No selected file."}), 400
+    upload_path = os.path.join(OUTPUT_DIR_UPLOADS, file.filename)
+    file.save(upload_path)
+    success, message, result_filename = calibration_controller.quick_undistort_video(upload_path)
+    if success:
+        return jsonify({"success": True, "message": message, "download_url": url_for('static', filename=f'uploads/{result_filename}')})
+    else:
+        return jsonify({"success": False, "message": message}), 500
+
+
+# --- Routes for TFLite Inference ---
+@app.route("/upload_for_inference", methods=["POST"])
+def upload_for_inference_route():
+    """Handles video upload for inference."""
     if 'video' not in request.files:
         return jsonify({"success": False, "message": "No video file provided."}), 400
     
@@ -166,47 +253,64 @@ def quick_undistort_route():
     upload_path = os.path.join(OUTPUT_DIR_UPLOADS, file.filename)
     file.save(upload_path)
     
-    success, message, result_filename = calibration_controller.quick_undistort_video(upload_path)
+    input_url = url_for('static', filename=f'uploads/{file.filename}')
+    return jsonify({"success": True, "message": "File uploaded.", "input_path": input_url})
+
+@app.route("/run_inference", methods=["POST"])
+def run_inference_route():
+    """Starts the inference process in a background thread."""
+    global inference_status
+    if inference_status["status"] == "running":
+        return jsonify({"success": False, "message": "An inference job is already running."}), 400
+
+    data = request.get_json()
+    input_path = data.get('input_path')
+    if not input_path:
+        return jsonify({"success": False, "message": "No input_path provided."}), 400
+
+    inference_status = {"status": "running", "output_url": None, "message": "Process starting..."}
+    thread = threading.Thread(target=run_inference_task, args=(input_path,), daemon=True)
+    thread.start()
     
-    if success:
-        return jsonify({"success": True, "message": message, "download_url": url_for('static', filename=f'uploads/{result_filename}')})
-    else:
-        return jsonify({"success": False, "message": message}), 500
+    return jsonify({"success": True, "message": "Inference process started."})
+
+@app.route("/check_inference_status", methods=["GET"])
+def check_inference_status_route():
+    """Polls for the status of the running inference job."""
+    global inference_status
+    
+    status_copy = inference_status.copy()
+
+    if status_copy["status"] == "complete" and status_copy["output_url"]:
+        # The 'output_url' is the raw path from the homography script
+        # e.g., "line_call_inferences/yolo_homog_rally1.mp4"
+        status_copy["output_url"] = url_for('static', filename=status_copy["output_url"])
+        
+    return jsonify(status_copy)
 
 
 # --- System and Health Routes ---
 @app.route("/device_status", methods=["GET"])
 def device_status_route():
-    """Endpoint to get the current recording status, device name, and device_id."""
     is_recording = get_recording_status()
     status_message = "Active: Recording is in progress." if is_recording else "Idle: Not currently recording."
-    
-    return jsonify({
-        "name": get_device_name(),
-        "device_id": get_device_uuid(), 
-        "recording": is_recording, 
-        "message": status_message
-    })
+    return jsonify({"name": get_device_name(), "device_id": get_device_uuid(), "recording": is_recording, "message": status_message})
 
 @app.route("/health_report", methods=["GET"])
 def health_report_route():
-    """Endpoint to get a system health report."""
     return jsonify(get_health_report())
 
 
 # --- API Endpoints for File Explorer ---
 @app.route("/api/files", methods=["GET"])
 def get_files_route():
-    """Returns a JSON list of all media files, categorized by type."""
     return jsonify(file_manager.get_file_list())
 
 @app.route('/api/download_zip', methods=['GET', 'POST'])
 def download_zip_route():
-    """Creates and sends a zip file of selected or all media files."""
     files_to_zip = []
     zip_filename = "archive.zip"
     all_files_data = file_manager.get_file_list()
-
     if request.method == 'GET':
         download_type = request.args.get('type')
         if download_type == 'all_images':
@@ -215,59 +319,44 @@ def download_zip_route():
         elif download_type == 'all_videos':
             files_to_zip = [f['path'] for f in all_files_data['videos']]
             zip_filename = "all_videos.zip"
-    else: # POST for selected files
+    else: 
         data = request.get_json()
         files_to_zip = data.get('files', [])
         image_count = sum(1 for f in files_to_zip if 'captures' in f)
         video_count = len(files_to_zip) - image_count
         file_type = "images" if image_count > video_count else "videos"
         zip_filename = f"selected_{file_type}.zip"
-
     if not files_to_zip:
         return jsonify({"success": False, "message": "No files found for zipping."}), 400
-
     zip_path = file_manager.create_zip_archive(files_to_zip, zip_filename)
     return send_file(zip_path, as_attachment=True)
 
 @app.route('/api/delete_files', methods=['POST'])
 def delete_files_route():
-    """Deletes selected files from the server after verifying a PIN."""
     data = request.get_json()
     files_to_delete = data.get('files', [])
     submitted_pin = data.get('pin')
-
-    # PIN Verification Logic
     if submitted_pin != DELETE_PIN:
-        return jsonify({"success": False, "message": "❌ Invalid PIN. Deletion denied."}), 403 # 403 Forbidden
-
+        return jsonify({"success": False, "message": "❌ Invalid PIN. Deletion denied."}), 403 
     if not files_to_delete:
         return jsonify({"success": False, "message": "No files selected for deletion."}), 400
-        
     deleted_count, errors = file_manager.delete_selected_files(files_to_delete)
-    
     if errors:
         message = f"Completed with errors. Deleted {deleted_count} file(s). Errors: {'; '.join(errors)}"
         return jsonify({"success": False, "message": message}), 500
-    
     return jsonify({"success": True, "message": f"✅ Successfully deleted {deleted_count} file(s)."})
 
 
 # --- System Control Routes ---
 @app.route("/restart_app", methods=["POST"])
 def restart_app_route():
-    """Endpoint to restart the Flask application."""
     restart_app()
     return jsonify({"success": True, "message": "Application is restarting."})
 
 @app.route("/restart_system", methods=["POST"])
 def restart_system_route():
-    """Endpoint to restart the Raspberry Pi."""
     restart_system()
-    return jsonify({
-        "success": True, 
-        "message": "System is restarting.",
-        "device_id": get_device_uuid() 
-    })
+    return jsonify({"success": True, "message": "System is restarting.", "device_id": get_device_uuid()})
 
 
 # --- Main Execution ---
