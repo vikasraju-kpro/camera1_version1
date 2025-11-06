@@ -5,7 +5,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const stopRecordBtn = document.getElementById('stopLineCallBtn');
     const mediaOutputDiv = document.getElementById('media-output');
     const mediaOutputDiv2D = document.getElementById('media-output-2d');
-    const mediaOutputDiv2DZoom = document.getElementById('media-output-2d-zoom'); // <-- NEW
+    const mediaOutputDiv2DZoom = document.getElementById('media-output-2d-zoom');
+    const mediaOutputReplay = document.getElementById('media-output-replay'); // <-- NEW
     
     // --- Inference Selectors ---
     const videoUploadInput = document.getElementById('videoUpload');
@@ -33,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayVideo(url) {
-        mediaOutputDiv.innerHTML = ''; // Clear previous output
+        mediaOutputDiv.innerHTML = '<h3>Annotated Video</h3>'; // Clear previous output
         const video = document.createElement('video');
         video.src = url + '?t=' + new Date().getTime(); // Cache bust
         video.controls = true;
@@ -44,18 +45,33 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaOutputDiv.appendChild(video);
         mediaOutputDiv.appendChild(downloadLink);
     }
+    
+    // --- NEW: Function to display replay video ---
+    function displayReplayVideo(url) {
+        mediaOutputReplay.innerHTML = '<h3>Slow-Motion Replay</h3>'; // Clear previous
+        const video = document.createElement('video');
+        video.src = url + '?t=' + new Date().getTime(); // Cache bust
+        video.controls = true;
+        video.autoplay = true;
+        video.muted = true; 
+        video.loop = true; // Loop the replay
+        video.style.maxWidth = '400px'; // Match image size
+
+        const downloadLink = createDownloadLink(url, 'Download Replay');
+        mediaOutputReplay.appendChild(video);
+        mediaOutputReplay.appendChild(downloadLink);
+    }
 
     function display2dImage(url) {
-        mediaOutputDiv2D.innerHTML = ''; // Clear previous
+        mediaOutputDiv2D.innerHTML = '<h3>2D Full Court</h3>'; // Clear previous
         const img = document.createElement('img');
         img.src = url + '?t=' + new Date().getTime(); // Cache bust
         img.alt = '2D Court Illustration';
         mediaOutputDiv2D.appendChild(img);
     }
 
-    // --- NEW: Function to display 2D zoom illustration ---
     function display2dZoomImage(url) {
-        mediaOutputDiv2DZoom.innerHTML = ''; // Clear previous
+        mediaOutputDiv2DZoom.innerHTML = '<h3>2D Zoom</h3>'; // Clear previous
         const img = document.createElement('img');
         img.src = url + '?t=' + new Date().getTime(); // Cache bust
         img.alt = '2D Zoomed Illustration';
@@ -69,11 +85,11 @@ document.addEventListener('DOMContentLoaded', () => {
         runOnLatestBtn.disabled = disabled;
     }
     
-    // --- NEW: Function to clear all media outputs ---
     function clearMedia() {
         mediaOutputDiv.innerHTML = '';
         mediaOutputDiv2D.innerHTML = '';
-        mediaOutputDiv2DZoom.innerHTML = ''; // <-- NEW
+        mediaOutputDiv2DZoom.innerHTML = '';
+        mediaOutputReplay.innerHTML = ''; // <-- NEW
         runOnLatestBtn.style.display = 'none';
         latestRecordedVideoPath = null;
     }
@@ -108,7 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setAllButtonsDisabled(false); 
             
             if (result.success && result.video_url) {
-                displayVideo(result.video_url);
+                displayVideo(result.video_url); // Display original recorded video
                 latestRecordedVideoPath = result.video_url; 
                 runOnLatestBtn.style.display = 'inline-block'; 
             }
@@ -198,13 +214,21 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (result.status === 'complete') {
                 clearInterval(statusInterval); 
                 updateStatus(result.message, false);
+                
+                // Display annotated video
                 displayVideo(result.output_url); 
                 
+                // --- NEW: Display the replay video ---
+                if (result.output_replay_url) {
+                    displayReplayVideo(result.output_replay_url);
+                }
+
                 // Display the full 2D image
                 if (result.output_2d_url) {
                     display2dImage(result.output_2d_url);
                 }
-                // --- NEW: Display the 2D zoom image ---
+                
+                // Display the 2D zoom image
                 if (result.output_2d_zoom_url) {
                     display2dZoomImage(result.output_2d_zoom_url);
                 }

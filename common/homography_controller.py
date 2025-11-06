@@ -113,7 +113,7 @@ def get_landing_point(csv_path):
         print(f"❌ Error processing CSV: {e}")
         return None, None, None
 
-# --- NEW: Function to draw FULL 2D court map ---
+# --- Function to draw FULL 2D court map ---
 def generate_2d_illustration_full(landing_point_2d, in_zone, output_dir, base_filename):
     """
     Draws a 2D top-down illustration of the full court and landing point.
@@ -165,7 +165,7 @@ def generate_2d_illustration_full(landing_point_2d, in_zone, output_dir, base_fi
         print(f"❌ Error generating 2D full illustration: {e}")
         return None
 
-# --- NEW: Function to draw ZOOMED 2D court map ---
+# --- Function to draw ZOOMED 2D court map ---
 def generate_2d_illustration_zoom(landing_point_2d, in_zone, output_dir, base_filename):
     """
     Draws a zoomed-in "Hawk-Eye" style illustration of the landing point.
@@ -198,12 +198,10 @@ def generate_2d_illustration_zoom(landing_point_2d, in_zone, output_dir, base_fi
         zoom_resized = cv2.resize(zoom_crop, FINAL_ZOOM_SIZE, interpolation=cv2.INTER_LINEAR)
         
         # 6. Calculate landing point *relative to the resized crop*
-        # (It should be in the center)
         center_x_resized = FINAL_ZOOM_SIZE[0] // 2
         center_y_resized = FINAL_ZOOM_SIZE[1] // 2
 
         # 7. Draw "Hawk-Eye" style landing mark
-        # Ellipse: (img, center, axes, angle, startAngle, endAngle, color, thickness)
         color = (0, 255, 0) if in_zone else (0, 0, 255)
         cv2.ellipse(zoom_resized, (center_x_resized, center_y_resized), (30, 50), 0, 0, 360, color, -1)
         cv2.ellipse(zoom_resized, (center_x_resized, center_y_resized), (30, 50), 0, 0, 360, (255, 255, 255), 3) # White border
@@ -222,24 +220,95 @@ def generate_2d_illustration_zoom(landing_point_2d, in_zone, output_dir, base_fi
         print(f"❌ Error generating 2D zoom illustration: {e}")
         return None
 
+# --- NEW: Function to create slow-motion zoom replay ---
+def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps):
+    """
+    Creates a slow-motion, zoomed-in replay clip of the landing.
+    """
+    try:
+        cap = cv2.VideoCapture(original_video_path)
+        if not cap.isOpened():
+            print(f"❌ Error: Cannot open original video for replay: {original_video_path}")
+            return None
+
+        # Define clip parameters
+        FRAMES_BEFORE = 15
+        FRAMES_AFTER = 15
+        CLIP_DURATION = FRAMES_BEFORE + FRAMES_AFTER
+        SLOWMO_FACTOR = 4 # Write each frame 4 times
+        ZOOM_BOX_SIZE = 200 # 400x400 box
+        FINAL_REPLAY_SIZE = (600, 600)
+
+        start_frame = max(0, landing_frame - FRAMES_BEFORE)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        
+        # Create VideoWriter
+        output_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_replay.mp4"
+        output_video_path = os.path.join(output_dir, output_filename)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_video_path, fourcc, fps, FINAL_REPLAY_SIZE)
+
+        if not out.isOpened():
+             print(f"❌ Error: Could not create VideoWriter for replay at {output_video_path}")
+             cap.release()
+             return None
+
+        print(f"--- Creating slow-mo replay from frame {start_frame} ---")
+        
+        lp_x, lp_y = landing_point
+
+        for _ in range(CLIP_DURATION):
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # Calculate zoom box
+            x1 = max(0, lp_x - ZOOM_BOX_SIZE)
+            y1 = max(0, lp_y - ZOOM_BOX_SIZE)
+            x2 = min(frame.shape[1], lp_x + ZOOM_BOX_SIZE)
+            y2 = min(frame.shape[0], lp_y + ZOOM_BOX_SIZE)
+            
+            crop = frame[y1:y2, x1:x2]
+            
+            # Resize to final size
+            zoomed_frame = cv2.resize(crop, FINAL_REPLAY_SIZE, interpolation=cv2.INTER_LINEAR)
+            
+            # Write frame multiple times for slow-mo
+            for _ in range(SLOWMO_FACTOR):
+                out.write(zoomed_frame)
+        
+        cap.release()
+        out.release()
+        
+        web_video_path = os.path.join(os.path.basename(output_dir), output_filename)
+        print(f"✅ Slow-mo replay saved to: {output_video_path}")
+        return web_video_path
+        
+    except Exception as e:
+        print(f"❌ Error creating slow-mo replay: {e}")
+        if 'cap' in locals() and cap.isOpened(): cap.release()
+        if 'out' in locals() and out.isOpened(): out.release()
+        return None
+
 # --- Step 2: Main Video + YOLO + Homography ---
 def run_homography_check(video_path, csv_path, output_dir):
     """
     Runs YOLO homography check on a video using a TFLite CSV.
-    Returns (True, web_video_path, web_2d_full_path, web_2d_zoom_path) on success,
-    or (False, error_message, None, None) on failure.
+    Returns (True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path) on success,
+    or (False, error_message, None, None, None) on failure.
     """
     web_2d_full_path = None
     web_2d_zoom_path = None
+    web_replay_path = None
     try:
         # Get landing point
         landing_point, landing_frame, total_frames = get_landing_point(csv_path)
         if landing_point is None:
-            return False, "No valid landing point found in CSV. Cannot determine IN/OUT.", None, None
+            return False, "No valid landing point found in CSV. Cannot determine IN/OUT.", None, None, None
 
         # Load YOLO model
         if not os.path.exists(MODEL_PATH):
-            return False, f"YOLO model not found at {MODEL_PATH}. Please place it in the root directory.", None, None
+            return False, f"YOLO model not found at {MODEL_PATH}. Please place it in the root directory.", None, None, None
         model = YOLO(MODEL_PATH)
         print("✅ YOLO model loaded successfully.")
 
@@ -253,7 +322,7 @@ def run_homography_check(video_path, csv_path, output_dir):
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return False, f"Cannot open video file: {video_path}", None, None
+            return False, f"Cannot open video file: {video_path}", None, None, None
 
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -265,7 +334,7 @@ def run_homography_check(video_path, csv_path, output_dir):
         
         out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         if not out.isOpened():
-             return False, f"Could not create VideoWriter at {output_video_path}", None, None
+             return False, f"Could not create VideoWriter at {output_video_path}", None, None, None
 
         H = None
         H_inv = None 
@@ -343,12 +412,15 @@ def run_homography_check(video_path, csv_path, output_dir):
                             lp_2d = tuple(lp_2d_array[0][0].astype(int))
                             print(f"✅ Mapped 2D landing point: {lp_2d}")
                             
-                            # --- MODIFIED: Call both generation functions ---
+                            # --- MODIFIED: Call all 3 generation functions ---
                             web_2d_full_path = generate_2d_illustration_full(
                                 lp_2d, in_zone, output_dir, base_filename
                             )
                             web_2d_zoom_path = generate_2d_illustration_zoom(
                                 lp_2d, in_zone, output_dir, base_filename
+                            )
+                            web_replay_path = create_slow_zoom_replay(
+                                video_path, landing_frame, landing_point, output_dir, base_filename, fps
                             )
 
                     # Draw only after landing frame
@@ -369,12 +441,12 @@ def run_homography_check(video_path, csv_path, output_dir):
         print(f"✅ Output video saved to: {output_video_path}")
         
         web_video_path = os.path.join(os.path.basename(output_dir), os.path.basename(output_video_path))
-        # --- MODIFIED: Return all 3 paths ---
-        return True, web_video_path, web_2d_full_path, web_2d_zoom_path 
+        # --- MODIFIED: Return all 4 paths ---
+        return True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path 
 
     except Exception as e:
         print(f"❌ Error during homography processing: {e}")
         if 'cap' in locals() and cap.isOpened(): cap.release()
         if 'out' in locals() and out.isOpened(): out.release()
         if 'pbar' in locals(): pbar.close()
-        return False, str(e), None, None
+        return False, str(e), None, None, None
