@@ -4,15 +4,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const startRecordBtn = document.getElementById('startLineCallBtn');
     const stopRecordBtn = document.getElementById('stopLineCallBtn');
     const mediaOutputDiv = document.getElementById('media-output');
+    const mediaOutputDiv2D = document.getElementById('media-output-2d'); // <-- NEW
     
-    // --- NEW: Inference Selectors ---
+    // --- Inference Selectors ---
     const videoUploadInput = document.getElementById('videoUpload');
     const uploadAndRunBtn = document.getElementById('uploadAndRunBtn');
     const runOnLatestBtn = document.getElementById('runOnLatestBtn');
 
     // --- Global State ---
     let latestRecordedVideoPath = null;
-    let statusInterval = null; // To store the interval ID for polling
+    let statusInterval = null; 
 
     // --- Helper Functions ---
     function updateStatus(message, isError = false) {
@@ -43,26 +44,46 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaOutputDiv.appendChild(downloadLink);
     }
 
+    // --- NEW: Function to display 2D illustration ---
+    function display2dImage(url) {
+        mediaOutputDiv2D.innerHTML = ''; // Clear previous
+        const img = document.createElement('img');
+        img.src = url + '?t=' + new Date().getTime(); // Cache bust
+        img.alt = '2D Court Illustration';
+        img.style.width = '100%'; // Make it responsive
+        img.style.maxWidth = '400px'; // Max width
+        img.style.border = '1px solid #ddd';
+        mediaOutputDiv2D.appendChild(img);
+    }
+
     function setAllButtonsDisabled(disabled) {
         startRecordBtn.disabled = disabled;
         stopRecordBtn.disabled = disabled;
         uploadAndRunBtn.disabled = disabled;
         runOnLatestBtn.disabled = disabled;
     }
+    
+    // --- NEW: Function to clear all media outputs ---
+    function clearMedia() {
+        mediaOutputDiv.innerHTML = '';
+        mediaOutputDiv2D.innerHTML = '';
+        runOnLatestBtn.style.display = 'none';
+        latestRecordedVideoPath = null;
+    }
 
     // --- Recording Event Listeners ---
     startRecordBtn.addEventListener('click', async () => {
         updateStatus('Starting line call recording...');
-        setAllButtonsDisabled(true); // Disable all buttons
+        setAllButtonsDisabled(true); 
+        clearMedia(); // <-- NEW: Clear old results
         try {
             const response = await fetch('/start_line_calling', { method: 'POST' });
             const result = await response.json();
             updateStatus(result.message, !result.success);
             if (result.success) {
-                stopRecordBtn.disabled = false; // Only enable stop
-                runOnLatestBtn.style.display = 'none'; // Hide inference btn
+                stopRecordBtn.disabled = false;
             } else {
-                setAllButtonsDisabled(false); // Re-enable if failed
+                setAllButtonsDisabled(false); 
             }
         } catch (error) {
             updateStatus('A network error occurred.', true);
@@ -72,16 +93,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     stopRecordBtn.addEventListener('click', async () => {
         updateStatus('Stopping recording and processing video...');
+        clearMedia(); // <-- NEW: Clear old results
         try {
             const response = await fetch('/stop_line_calling', { method: 'POST' });
             const result = await response.json();
             updateStatus(result.message, !result.success);
-            setAllButtonsDisabled(false); // Re-enable all buttons
+            setAllButtonsDisabled(false); 
             
             if (result.success && result.video_url) {
                 displayVideo(result.video_url);
-                latestRecordedVideoPath = result.video_url; // Save the path
-                runOnLatestBtn.style.display = 'inline-block'; // Show "Run Inference" btn
+                latestRecordedVideoPath = result.video_url; 
+                runOnLatestBtn.style.display = 'inline-block'; 
             }
         } catch (error) {
             updateStatus('A network error occurred.', true);
@@ -90,9 +112,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 
-    // --- NEW: Inference Event Listeners & Functions ---
+    // --- Inference Event Listeners & Functions ---
 
-    // 1. Click listener for the "Run Inference on This Video" button
     runOnLatestBtn.addEventListener('click', () => {
         if (latestRecordedVideoPath) {
             startInferenceProcess(latestRecordedVideoPath);
@@ -101,7 +122,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // 2. Click listener for the "Upload & Run Inference" button
     uploadAndRunBtn.addEventListener('click', async () => {
         const file = videoUploadInput.files[0];
         if (!file) {
@@ -111,6 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateStatus('Uploading video...');
         setAllButtonsDisabled(true);
+        clearMedia(); // <-- NEW: Clear old results
 
         const formData = new FormData();
         formData.append('video', file);
@@ -124,7 +145,6 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (result.success) {
                 updateStatus('Upload complete. Starting inference...', false);
-                // Call the function to start the background job
                 startInferenceProcess(result.input_path); 
             } else {
                 updateStatus(result.message, true);
@@ -136,11 +156,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // 3. Function to start the background inference job
     async function startInferenceProcess(videoPath) {
-        updateStatus('Starting inference... This may take several minutes.');
-        setAllButtonsDisabled(true); // Disable all controls
-        runOnLatestBtn.style.display = 'none'; // Hide button
+        updateStatus('Starting 2-stage inference... This may take several minutes.');
+        setAllButtonsDisabled(true); 
+        clearMedia(); // <-- NEW: Clear old results
 
         try {
             const response = await fetch('/run_inference', {
@@ -151,7 +170,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.success) {
-                // Start polling
                 statusInterval = setInterval(checkInferenceStatus, 2000);
             } else {
                 updateStatus(result.message, true);
@@ -163,7 +181,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 4. Function to poll for the job status
     async function checkInferenceStatus() {
         try {
             const response = await fetch('/check_inference_status');
@@ -172,19 +189,23 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.status === 'running') {
                 updateStatus(result.message || 'Processing... please wait.');
             } else if (result.status === 'complete') {
-                clearInterval(statusInterval); // Stop polling
+                clearInterval(statusInterval); 
                 updateStatus(result.message, false);
-                displayVideo(result.output_url); // Display the new video
-                setAllButtonsDisabled(false); // Re-enable controls
-                latestRecordedVideoPath = null; // Clear the "latest" video
+                displayVideo(result.output_url); 
+                // --- NEW: Display the 2D image ---
+                if (result.output_2d_url) {
+                    display2dImage(result.output_2d_url);
+                }
+                setAllButtonsDisabled(false); 
+                latestRecordedVideoPath = null; 
             } else if (result.status === 'error') {
-                clearInterval(statusInterval); // Stop polling
+                clearInterval(statusInterval); 
                 updateStatus(result.message, true);
-                setAllButtonsDisabled(false); // Re-enable controls
-                latestRecordedVideoPath = null; // Clear the "latest" video
+                setAllButtonsDisabled(false); 
+                latestRecordedVideoPath = null; 
             }
         } catch (error) {
-            clearInterval(statusInterval); // Stop polling on error
+            clearInterval(statusInterval); 
             updateStatus('Error checking status. Please reload.', true);
             setAllButtonsDisabled(false);
         }

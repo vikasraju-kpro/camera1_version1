@@ -18,6 +18,8 @@
         a.download-button { margin-top: 10px; background-color: #0d6efd; color: white; border-color: #0d6efd; }
         /* NEW: Style for the run inference button */
         #runOnLatestBtn { background-color: #198754; color: white; border-color: #198754; display: none; }
+        /* NEW: Style for the 2D illustration */
+        #media-output-2d img { border: 1px solid #ddd; }
     </style>
 </head>
 <body>
@@ -47,6 +49,8 @@
         <div class="output">
             <h2>Latest Output</h2>
             <div id="media-output">
+                </div>
+            <div id="media-output-2d" style="margin-top: 20px;">
                 </div>
             <button id="runOnLatestBtn">Run Inference on This Video</button>
         </div>

@@ -44,3 +44,11 @@ calibration_data/
 
 #files
 *.zip
+
+# Generated data/inferences
+static/line_call_inferences/
+
+# Large video files in the static folder
+static/*.mp4
+static/*.mov
+static/*.avi

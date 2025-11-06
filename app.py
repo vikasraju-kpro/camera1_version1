@@ -15,7 +15,7 @@ from common.camera_controller import (
 from common import calibration_controller
 from common import file_manager 
 from common import inference_controller
-from common import homography_controller # <-- NEW
+from common import homography_controller 
 from common.system_controller import restart_app, restart_system
 from utils.health_check import get_health_report
 from utils.device_info import get_device_uuid, get_device_name
@@ -29,7 +29,7 @@ OUTPUT_DIR_CALIB_IMAGES = "static/calibration_images"
 OUTPUT_DIR_UPLOADS = "static/uploads"
 CALIB_DATA_DIR = "calibration_data"
 OUTPUT_DIR_LINE_CALLS = "static/line_calls"
-OUTPUT_DIR_INFERENCES = "static/line_call_inferences"
+OUTPUT_DIR_INFERENCES = "static/line_call_inferences" 
 IMAGE_EXTENSION = ".jpg"
 VIDEO_EXTENSION = ".mp4"
 DELETE_PIN = "kpro" 
@@ -38,6 +38,7 @@ DELETE_PIN = "kpro"
 inference_status = {
     "status": "idle", # "idle", "running", "complete", "error"
     "output_url": None,
+    "output_2d_url": None, # <-- NEW
     "message": None
 }
 
@@ -54,7 +55,7 @@ initialize_camera()
 # --- End Application Startup ---
 
 
-# --- MODIFIED: Thread target function for running inference ---
+# --- Thread target function for running inference ---
 def run_inference_task(input_video_path):
     """
     This function runs in a separate thread.
@@ -78,7 +79,6 @@ def run_inference_task(input_video_path):
         )
 
         if not success_tflite:
-            # tflite_vid_path is the error message in this case
             raise Exception(f"TFLite inference failed: {tflite_vid_path}")
 
         print(f"--- TFLite step complete. CSV at: {tflite_csv_path} ---")
@@ -86,23 +86,23 @@ def run_inference_task(input_video_path):
         
         # --- STAGE 2: Run YOLO Homography ---
         inference_status["message"] = "Stage 2/2: Running court detection..."
-        success_homog, homog_path_or_err = homography_controller.run_homography_check(
-            filesystem_path,     # Use the *original* video
-            tflite_csv_path,     # Use the CSV we just made
+        # --- MODIFIED: Expect 3 return values ---
+        success_homog, final_video_path, final_2d_image_path = homography_controller.run_homography_check(
+            filesystem_path,     
+            tflite_csv_path,     
             OUTPUT_DIR_INFERENCES
         )
 
         if not success_homog:
-            # homog_path_or_err is the error message
-            raise Exception(f"Homography check failed: {homog_path_or_err}")
+            raise Exception(f"Homography check failed: {final_video_path}")
         
-        print(f"--- Homography step complete. Final video at: {homog_path_or_err} ---")
+        print(f"--- Homography step complete. Final video at: {final_video_path} ---")
 
         # --- STAGE 3: Set final status ---
-        # homog_path_or_err is the web-accessible path (e.g., "line_call_inferences/yolo_...mp4")
         inference_status = {
             "status": "complete",
-            "output_url": homog_path_or_err, # This is the web path from the homog script
+            "output_url": final_video_path,       # Web path to video
+            "output_2d_url": final_2d_image_path, # <-- NEW: Web path to 2D image
             "message": "Line calling process complete."
         }
         print(f"Inference thread finished: {inference_status['status']}")
@@ -112,6 +112,7 @@ def run_inference_task(input_video_path):
         inference_status = {
             "status": "error",
             "output_url": None,
+            "output_2d_url": None, # <-- NEW
             "message": str(e)
         }
 
@@ -268,7 +269,7 @@ def run_inference_route():
     if not input_path:
         return jsonify({"success": False, "message": "No input_path provided."}), 400
 
-    inference_status = {"status": "running", "output_url": None, "message": "Process starting..."}
+    inference_status = {"status": "running", "output_url": None, "output_2d_url": None, "message": "Process starting..."}
     thread = threading.Thread(target=run_inference_task, args=(input_path,), daemon=True)
     thread.start()
     
@@ -281,11 +282,13 @@ def check_inference_status_route():
     
     status_copy = inference_status.copy()
 
-    if status_copy["status"] == "complete" and status_copy["output_url"]:
-        # The 'output_url' is the raw path from the homography script
-        # e.g., "line_call_inferences/yolo_homog_rally1.mp4"
-        status_copy["output_url"] = url_for('static', filename=status_copy["output_url"])
-        
+    if status_copy["status"] == "complete":
+        if status_copy.get("output_url"):
+            status_copy["output_url"] = url_for('static', filename=status_copy["output_url"])
+        # --- NEW: Build the 2D image URL ---
+        if status_copy.get("output_2d_url"):
+            status_copy["output_2d_url"] = url_for('static', filename=status_copy["output_2d_url"])
+            
     return jsonify(status_copy)
 
 
