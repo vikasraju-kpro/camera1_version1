@@ -10,6 +10,27 @@ MODEL_PATH = "badminton_court_keypoint.pt"
 CONFIDENCE_THRESHOLD = 0.3
 # ----------------------
 
+# --- COURT TEMPLATE (GLOBAL) ---
+COURT_TEMPLATE = {
+    "baseline_bottom": ((286, 2935), (1379, 2935)),
+    "net": ((286, 1748), (1379, 1748)),
+    # Outer doubles lines
+    "left_outer_line": ((286, 2935), (286, 1748)),
+    "right_outer_line": ((1379, 2935), (1379, 1748)),
+    # Inner singles lines
+    "left_inner_line": ((286 + 82, 2935), (286 + 82, 2935 - 836)),  # (368, 2935) -> (368, 2099)
+    "right_inner_line": ((1379 - 84, 2935), (1379 - 84, 2935 - 836)), # (1295, 2935) -> (1295, 2099)
+    # Service box lines
+    "front_service_line": ((286, 2935 - 836), (1379, 2935 - 836)),  # (286, 2099) -> (1379, 2099)
+    "doubles_long_service_line": ((286, 2935 - 135), (1379, 2935 - 135)), # (286, 2800) -> (1379, 2800)
+    "center_line": ((833, 2935), (833, 2935 - 836)), # (833, 2935) -> (833, 2099)
+}
+
+# --- 2D IMAGE CONSTANTS ---
+W_2D = 1665
+H_2D = 3228
+PADDING = 100
+
 # --- Utility: Line Intersection ---
 def line_intersection(p1, p2, p3, p4):
     """Finds intersection of lines (p1,p2) and (p3,p4). Returns None if parallel."""
@@ -92,18 +113,13 @@ def get_landing_point(csv_path):
         print(f"❌ Error processing CSV: {e}")
         return None, None, None
 
-# --- Function to draw 2D court map ---
-def generate_2d_illustration(court_template, landing_point_2d, in_zone, output_dir, base_filename):
+# --- NEW: Function to draw FULL 2D court map ---
+def generate_2d_illustration_full(landing_point_2d, in_zone, output_dir, base_filename):
     """
-    Draws a 2D top-down illustration of the court, landing zone, and landing point.
+    Draws a 2D top-down illustration of the full court and landing point.
     Saves it as an image and returns the web-accessible path.
     """
     try:
-        # Define 2D image dimensions with padding
-        W_2D = 1665
-        H_2D = 3228
-        PADDING = 100
-        
         # Create a blank white image
         img_2d = np.ones((H_2D + PADDING * 2, W_2D + PADDING * 2, 3), dtype=np.uint8) * 255
         
@@ -112,15 +128,15 @@ def generate_2d_illustration(court_template, landing_point_2d, in_zone, output_d
             return (int(point[0] + PADDING), int(point[1] + PADDING))
 
         # Draw all court lines from the template
-        for name, (p1, p2) in court_template.items():
+        for name, (p1, p2) in COURT_TEMPLATE.items():
             cv2.line(img_2d, p(p1), p(p2), (0, 0, 0), 3) # Black lines
 
-        # Define the "IN" zone polygon from the template coordinates
+        # Define the "IN" zone polygon
         in_zone_template = np.array([
-            p(court_template["left_inner_line"][0]),
-            p(court_template["right_inner_line"][0]),
-            p((court_template["right_inner_line"][0][0], court_template["net"][0][1])), 
-            p((court_template["left_inner_line"][0][0], court_template["net"][0][1])) 
+            p(COURT_TEMPLATE["left_inner_line"][0]),
+            p(COURT_TEMPLATE["right_inner_line"][0]),
+            p((COURT_TEMPLATE["right_inner_line"][0][0], COURT_TEMPLATE["net"][0][1])), 
+            p((COURT_TEMPLATE["left_inner_line"][0][0], COURT_TEMPLATE["net"][0][1])) 
         ], dtype=np.int32)
         
         # Draw the "IN" zone
@@ -136,68 +152,108 @@ def generate_2d_illustration(court_template, landing_point_2d, in_zone, output_d
         cv2.putText(img_2d, text, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 2, color, 4, cv2.LINE_AA)
 
         # Save the image
-        output_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_2d.png"
+        output_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_2d_full.png"
         output_image_path = os.path.join(output_dir, output_filename)
         cv2.imwrite(output_image_path, img_2d)
         
         # Return the web-accessible path
         web_image_path = os.path.join(os.path.basename(output_dir), output_filename)
-        print(f"✅ 2D illustration saved to: {output_image_path}")
+        print(f"✅ 2D full illustration saved to: {output_image_path}")
         return web_image_path
         
     except Exception as e:
-        print(f"❌ Error generating 2D illustration: {e}")
+        print(f"❌ Error generating 2D full illustration: {e}")
+        return None
+
+# --- NEW: Function to draw ZOOMED 2D court map ---
+def generate_2d_illustration_zoom(landing_point_2d, in_zone, output_dir, base_filename):
+    """
+    Draws a zoomed-in "Hawk-Eye" style illustration of the landing point.
+    Saves it as a separate image and returns the web-accessible path.
+    """
+    try:
+        # 1. Create the base full-court image (in memory)
+        img_base = np.ones((H_2D + PADDING * 2, W_2D + PADDING * 2, 3), dtype=np.uint8) * 255
+        def p(point):
+            return (int(point[0] + PADDING), int(point[1] + PADDING))
+        for name, (p1, p2) in COURT_TEMPLATE.items():
+            cv2.line(img_base, p(p1), p(p2), (0, 0, 0), 5) # Thicker lines for zoom
+
+        # 2. Define zoom parameters
+        ZOOM_BOX_SIZE = 300 # Pixel radius from landing point to crop
+        FINAL_ZOOM_SIZE = (400, 400) # Output size
+
+        # 3. Get padded landing point coordinates
+        lp_padded = p(landing_point_2d)
+
+        # 4. Calculate crop region (y1:y2, x1:x2)
+        x1 = max(0, lp_padded[0] - ZOOM_BOX_SIZE)
+        y1 = max(0, lp_padded[1] - ZOOM_BOX_SIZE)
+        x2 = min(img_base.shape[1], lp_padded[0] + ZOOM_BOX_SIZE)
+        y2 = min(img_base.shape[0], lp_padded[1] + ZOOM_BOX_SIZE)
+        
+        zoom_crop = img_base[y1:y2, x1:x2]
+
+        # 5. Resize to final output size
+        zoom_resized = cv2.resize(zoom_crop, FINAL_ZOOM_SIZE, interpolation=cv2.INTER_LINEAR)
+        
+        # 6. Calculate landing point *relative to the resized crop*
+        # (It should be in the center)
+        center_x_resized = FINAL_ZOOM_SIZE[0] // 2
+        center_y_resized = FINAL_ZOOM_SIZE[1] // 2
+
+        # 7. Draw "Hawk-Eye" style landing mark
+        # Ellipse: (img, center, axes, angle, startAngle, endAngle, color, thickness)
+        color = (0, 255, 0) if in_zone else (0, 0, 255)
+        cv2.ellipse(zoom_resized, (center_x_resized, center_y_resized), (30, 50), 0, 0, 360, color, -1)
+        cv2.ellipse(zoom_resized, (center_x_resized, center_y_resized), (30, 50), 0, 0, 360, (255, 255, 255), 3) # White border
+
+        # 8. Save the zoomed image
+        output_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_2d_zoom.png"
+        output_image_path = os.path.join(output_dir, output_filename)
+        cv2.imwrite(output_image_path, zoom_resized)
+        
+        # 9. Return the web-accessible path
+        web_image_path = os.path.join(os.path.basename(output_dir), output_filename)
+        print(f"✅ 2D zoom illustration saved to: {output_image_path}")
+        return web_image_path
+
+    except Exception as e:
+        print(f"❌ Error generating 2D zoom illustration: {e}")
         return None
 
 # --- Step 2: Main Video + YOLO + Homography ---
 def run_homography_check(video_path, csv_path, output_dir):
     """
     Runs YOLO homography check on a video using a TFLite CSV.
-    Returns (True, web_video_path, web_2d_image_path) on success,
-    or (False, error_message, None) on failure.
+    Returns (True, web_video_path, web_2d_full_path, web_2d_zoom_path) on success,
+    or (False, error_message, None, None) on failure.
     """
-    web_2d_image_path = None
+    web_2d_full_path = None
+    web_2d_zoom_path = None
     try:
         # Get landing point
         landing_point, landing_frame, total_frames = get_landing_point(csv_path)
         if landing_point is None:
-            return False, "No valid landing point found in CSV. Cannot determine IN/OUT.", None
+            return False, "No valid landing point found in CSV. Cannot determine IN/OUT.", None, None
 
         # Load YOLO model
         if not os.path.exists(MODEL_PATH):
-            return False, f"YOLO model not found at {MODEL_PATH}. Please place it in the root directory.", None
+            return False, f"YOLO model not found at {MODEL_PATH}. Please place it in the root directory.", None, None
         model = YOLO(MODEL_PATH)
         print("✅ YOLO model loaded successfully.")
 
-        # --- MODIFIED: Corrected center_line coordinates ---
-        court_template = {
-            "baseline_bottom": ((286, 2935), (1379, 2935)),
-            "net": ((286, 1748), (1379, 1748)),
-            # Outer doubles lines
-            "left_outer_line": ((286, 2935), (286, 1748)),
-            "right_outer_line": ((1379, 2935), (1379, 1748)),
-            # Inner singles lines
-            "left_inner_line": ((286 + 82, 2935), (286 + 82, 2935 - 836)),  # (368, 2935) -> (368, 2099)
-            "right_inner_line": ((1379 - 84, 2935), (1379 - 84, 2935 - 836)), # (1295, 2935) -> (1295, 2099)
-            # Service box lines
-            "front_service_line": ((286, 2935 - 836), (1379, 2935 - 836)),  # (286, 2099) -> (1379, 2099)
-            "doubles_long_service_line": ((286, 2935 - 135), (1379, 2935 - 135)), # (286, 2800) -> (1379, 2800)
-            # --- THIS IS THE CORRECTED LINE ---
-            "center_line": ((833, 2935), (833, 2935 - 836)), # (833, 2935) -> (833, 2099)
-        }
-        # ----------------------------------------------------
-
-        # Reference pts for homography (we still use the 4 main points)
+        # Reference pts for homography
         template_pts = np.array([
-            court_template["baseline_bottom"][0],
-            court_template["baseline_bottom"][1],
-            court_template["front_service_line"][0],
-            court_template["front_service_line"][1]
+            COURT_TEMPLATE["baseline_bottom"][0],
+            COURT_TEMPLATE["baseline_bottom"][1],
+            COURT_TEMPLATE["front_service_line"][0],
+            COURT_TEMPLATE["front_service_line"][1]
         ], dtype=np.float32)
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return False, f"Cannot open video file: {video_path}", None
+            return False, f"Cannot open video file: {video_path}", None, None
 
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -209,7 +265,7 @@ def run_homography_check(video_path, csv_path, output_dir):
         
         out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         if not out.isOpened():
-             return False, f"Could not create VideoWriter at {output_video_path}", None
+             return False, f"Could not create VideoWriter at {output_video_path}", None, None
 
         H = None
         H_inv = None 
@@ -250,7 +306,7 @@ def run_homography_check(video_path, csv_path, output_dir):
 
                         # Map template lines
                         mapped = {}
-                        for name, (p1, p2) in court_template.items():
+                        for name, (p1, p2) in COURT_TEMPLATE.items():
                             line = np.array([[p1, p2]], dtype=np.float32)
                             mapped_line = cv2.perspectiveTransform(line, H)[0]
                             mapped[name] = (tuple(mapped_line[0]), tuple(mapped_line[1]))
@@ -266,7 +322,7 @@ def run_homography_check(video_path, csv_path, output_dir):
 
                 # Draw ALL court lines from template
                 if H is not None:
-                    for name, (p1, p2) in court_template.items():
+                    for name, (p1, p2) in COURT_TEMPLATE.items():
                         line = np.array([[p1, p2]], dtype=np.float32)
                         dst = cv2.perspectiveTransform(line, H)[0]
                         cv2.line(annotated_frame, tuple(dst[0].astype(int)), tuple(dst[1].astype(int)), (255, 255, 0), 2)
@@ -287,8 +343,12 @@ def run_homography_check(video_path, csv_path, output_dir):
                             lp_2d = tuple(lp_2d_array[0][0].astype(int))
                             print(f"✅ Mapped 2D landing point: {lp_2d}")
                             
-                            web_2d_image_path = generate_2d_illustration(
-                                court_template, lp_2d, in_zone, output_dir, base_filename
+                            # --- MODIFIED: Call both generation functions ---
+                            web_2d_full_path = generate_2d_illustration_full(
+                                lp_2d, in_zone, output_dir, base_filename
+                            )
+                            web_2d_zoom_path = generate_2d_illustration_zoom(
+                                lp_2d, in_zone, output_dir, base_filename
                             )
 
                     # Draw only after landing frame
@@ -309,11 +369,12 @@ def run_homography_check(video_path, csv_path, output_dir):
         print(f"✅ Output video saved to: {output_video_path}")
         
         web_video_path = os.path.join(os.path.basename(output_dir), os.path.basename(output_video_path))
-        return True, web_video_path, web_2d_image_path 
+        # --- MODIFIED: Return all 3 paths ---
+        return True, web_video_path, web_2d_full_path, web_2d_zoom_path 
 
     except Exception as e:
         print(f"❌ Error during homography processing: {e}")
         if 'cap' in locals() and cap.isOpened(): cap.release()
         if 'out' in locals() and out.isOpened(): out.release()
         if 'pbar' in locals(): pbar.close()
-        return False, str(e), None
+        return False, str(e), None, None

@@ -38,7 +38,8 @@ DELETE_PIN = "kpro"
 inference_status = {
     "status": "idle", # "idle", "running", "complete", "error"
     "output_url": None,
-    "output_2d_url": None, # <-- NEW
+    "output_2d_url": None, 
+    "output_2d_zoom_url": None, # <-- NEW
     "message": None
 }
 
@@ -86,8 +87,8 @@ def run_inference_task(input_video_path):
         
         # --- STAGE 2: Run YOLO Homography ---
         inference_status["message"] = "Stage 2/2: Running court detection..."
-        # --- MODIFIED: Expect 3 return values ---
-        success_homog, final_video_path, final_2d_image_path = homography_controller.run_homography_check(
+        # --- MODIFIED: Expect 4 return values ---
+        success_homog, final_video_path, final_2d_full_path, final_2d_zoom_path = homography_controller.run_homography_check(
             filesystem_path,     
             tflite_csv_path,     
             OUTPUT_DIR_INFERENCES
@@ -101,8 +102,9 @@ def run_inference_task(input_video_path):
         # --- STAGE 3: Set final status ---
         inference_status = {
             "status": "complete",
-            "output_url": final_video_path,       # Web path to video
-            "output_2d_url": final_2d_image_path, # <-- NEW: Web path to 2D image
+            "output_url": final_video_path,       
+            "output_2d_url": final_2d_full_path, 
+            "output_2d_zoom_url": final_2d_zoom_path, # <-- NEW
             "message": "Line calling process complete."
         }
         print(f"Inference thread finished: {inference_status['status']}")
@@ -112,7 +114,8 @@ def run_inference_task(input_video_path):
         inference_status = {
             "status": "error",
             "output_url": None,
-            "output_2d_url": None, # <-- NEW
+            "output_2d_url": None, 
+            "output_2d_zoom_url": None, # <-- NEW
             "message": str(e)
         }
 
@@ -269,7 +272,7 @@ def run_inference_route():
     if not input_path:
         return jsonify({"success": False, "message": "No input_path provided."}), 400
 
-    inference_status = {"status": "running", "output_url": None, "output_2d_url": None, "message": "Process starting..."}
+    inference_status = {"status": "running", "output_url": None, "output_2d_url": None, "output_2d_zoom_url": None, "message": "Process starting..."}
     thread = threading.Thread(target=run_inference_task, args=(input_path,), daemon=True)
     thread.start()
     
@@ -285,9 +288,11 @@ def check_inference_status_route():
     if status_copy["status"] == "complete":
         if status_copy.get("output_url"):
             status_copy["output_url"] = url_for('static', filename=status_copy["output_url"])
-        # --- NEW: Build the 2D image URL ---
         if status_copy.get("output_2d_url"):
             status_copy["output_2d_url"] = url_for('static', filename=status_copy["output_2d_url"])
+        # --- NEW: Build the 2D zoom image URL ---
+        if status_copy.get("output_2d_zoom_url"):
+            status_copy["output_2d_zoom_url"] = url_for('static', filename=status_copy["output_2d_zoom_url"])
             
     return jsonify(status_copy)
 

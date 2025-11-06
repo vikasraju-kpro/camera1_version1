@@ -4,7 +4,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const startRecordBtn = document.getElementById('startLineCallBtn');
     const stopRecordBtn = document.getElementById('stopLineCallBtn');
     const mediaOutputDiv = document.getElementById('media-output');
-    const mediaOutputDiv2D = document.getElementById('media-output-2d'); // <-- NEW
+    const mediaOutputDiv2D = document.getElementById('media-output-2d');
+    const mediaOutputDiv2DZoom = document.getElementById('media-output-2d-zoom'); // <-- NEW
     
     // --- Inference Selectors ---
     const videoUploadInput = document.getElementById('videoUpload');
@@ -44,16 +45,21 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaOutputDiv.appendChild(downloadLink);
     }
 
-    // --- NEW: Function to display 2D illustration ---
     function display2dImage(url) {
         mediaOutputDiv2D.innerHTML = ''; // Clear previous
         const img = document.createElement('img');
         img.src = url + '?t=' + new Date().getTime(); // Cache bust
         img.alt = '2D Court Illustration';
-        img.style.width = '100%'; // Make it responsive
-        img.style.maxWidth = '400px'; // Max width
-        img.style.border = '1px solid #ddd';
         mediaOutputDiv2D.appendChild(img);
+    }
+
+    // --- NEW: Function to display 2D zoom illustration ---
+    function display2dZoomImage(url) {
+        mediaOutputDiv2DZoom.innerHTML = ''; // Clear previous
+        const img = document.createElement('img');
+        img.src = url + '?t=' + new Date().getTime(); // Cache bust
+        img.alt = '2D Zoomed Illustration';
+        mediaOutputDiv2DZoom.appendChild(img);
     }
 
     function setAllButtonsDisabled(disabled) {
@@ -67,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function clearMedia() {
         mediaOutputDiv.innerHTML = '';
         mediaOutputDiv2D.innerHTML = '';
+        mediaOutputDiv2DZoom.innerHTML = ''; // <-- NEW
         runOnLatestBtn.style.display = 'none';
         latestRecordedVideoPath = null;
     }
@@ -75,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startRecordBtn.addEventListener('click', async () => {
         updateStatus('Starting line call recording...');
         setAllButtonsDisabled(true); 
-        clearMedia(); // <-- NEW: Clear old results
+        clearMedia(); 
         try {
             const response = await fetch('/start_line_calling', { method: 'POST' });
             const result = await response.json();
@@ -93,7 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     stopRecordBtn.addEventListener('click', async () => {
         updateStatus('Stopping recording and processing video...');
-        clearMedia(); // <-- NEW: Clear old results
+        clearMedia(); 
         try {
             const response = await fetch('/stop_line_calling', { method: 'POST' });
             const result = await response.json();
@@ -131,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateStatus('Uploading video...');
         setAllButtonsDisabled(true);
-        clearMedia(); // <-- NEW: Clear old results
+        clearMedia(); 
 
         const formData = new FormData();
         formData.append('video', file);
@@ -159,7 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function startInferenceProcess(videoPath) {
         updateStatus('Starting 2-stage inference... This may take several minutes.');
         setAllButtonsDisabled(true); 
-        clearMedia(); // <-- NEW: Clear old results
+        clearMedia(); 
 
         try {
             const response = await fetch('/run_inference', {
@@ -192,10 +199,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearInterval(statusInterval); 
                 updateStatus(result.message, false);
                 displayVideo(result.output_url); 
-                // --- NEW: Display the 2D image ---
+                
+                // Display the full 2D image
                 if (result.output_2d_url) {
                     display2dImage(result.output_2d_url);
                 }
+                // --- NEW: Display the 2D zoom image ---
+                if (result.output_2d_zoom_url) {
+                    display2dZoomImage(result.output_2d_zoom_url);
+                }
+
                 setAllButtonsDisabled(false); 
                 latestRecordedVideoPath = null; 
             } else if (result.status === 'error') {
