@@ -25,6 +25,42 @@
         }
         /* Style for output sections */
         .output-section { margin-top: 20px; }
+        
+        /* --- NEW: Styles for Semi-Auto --- */
+        #semi-auto-controls {
+            display: none; /* Hidden by default */
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #0d6efd;
+            background-color: #fff;
+            border-radius: 8px;
+        }
+        #frame-display-container {
+            position: relative;
+            max-width: 100%;
+            cursor: crosshair;
+        }
+        #frame-display-container img {
+            max-width: 100%;
+            height: auto;
+        }
+        #frame-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #semi-auto-status {
+            font-weight: bold;
+            color: #0d6efd;
+            margin: 10px 0;
+        }
+        #runSemiAutoBtn {
+            background-color: #198754;
+            color: white;
+            display: none; /* Hidden until 4 points are clicked */
+        }
     </style>
 </head>
 <body>
@@ -46,7 +82,24 @@
             <h2>Test Inference</h2>
             <p>Upload a video file to run the shuttle tracking inference.</p>
             <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*">
-            <button id="uploadAndRunBtn">Upload & Run Inference</button>
+            <hr>
+            <button id="autoRunBtn">Upload & Auto-Run Inference</button>
+            <button id="semiAutoUploadBtn">Upload for Semi-Auto</button>
+        </div>
+        
+        <div id="semi-auto-controls">
+            <h2>Semi-Auto Marking</h2>
+            <div id="semi-auto-status">Loading video frame...</div>
+            <div>
+                <button id="prevFrameBtn" disabled>&larr; Prev Frame</button>
+                <button id="nextFrameBtn">Next Frame &rarr;</button>
+                <span style="margin-left: 10px;">Frame: <span id="currentFrameNum">0</span></span>
+            </div>
+            <div id="frame-display-container">
+                <img id="frame-image" alt="Video frame for marking" />
+                <canvas id="frame-canvas"></canvas>
+            </div>
+            <button id="runSemiAutoBtn">Run Semi-Auto Inference</button>
         </div>
 
         <div id="status">Ready</div>
@@ -56,19 +109,15 @@
             <button id="runOnLatestBtn">Run Inference on This Video</button>
             
             <div id="media-output" class="output-section">
-                <h3>Annotated Video</h3>
                 </div>
             
             <div id="media-output-replay" class="output-section">
-                <h3>Slow-Motion Replay</h3>
                 </div>
 
             <div id="media-output-2d-zoom" class="output-section">
-                <h3>2D Zoom</h3>
                 </div>
 
             <div id="media-output-2d" class="output-section">
-                <h3>2D Full Court</h3>
                 </div>
         </div>
     </div>

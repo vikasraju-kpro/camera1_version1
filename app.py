@@ -2,7 +2,9 @@ import datetime
 import os
 import glob
 import threading 
-from flask import Flask, render_template, jsonify, url_for, request, send_file
+import cv2 # <-- NEW
+import io # <-- NEW
+from flask import Flask, render_template, jsonify, url_for, request, send_file, send_file
 
 from common.camera_controller import (
     initialize_camera,
@@ -40,7 +42,7 @@ inference_status = {
     "output_url": None,
     "output_2d_url": None, 
     "output_2d_zoom_url": None,
-    "output_replay_url": None, # <-- NEW
+    "output_replay_url": None, 
     "message": None
 }
 
@@ -57,12 +59,12 @@ initialize_camera()
 # --- End Application Startup ---
 
 
-# --- Thread target function for running inference ---
-def run_inference_task(input_video_path):
+# --- MODIFIED: Thread target function for running inference ---
+def run_inference_task(input_video_path, manual_points=None):
     """
     This function runs in a separate thread.
     It updates the global 'inference_status' variable.
-    NOW RUNS A 2-STAGE PIPELINE.
+    It now accepts optional manual_points.
     """
     global inference_status
     try:
@@ -88,11 +90,11 @@ def run_inference_task(input_video_path):
         
         # --- STAGE 2: Run YOLO Homography ---
         inference_status["message"] = "Stage 2/2: Running court detection..."
-        # --- MODIFIED: Expect 5 return values ---
         success_homog, final_video_path, final_2d_full_path, final_2d_zoom_path, final_replay_path = homography_controller.run_homography_check(
             filesystem_path,     
             tflite_csv_path,     
-            OUTPUT_DIR_INFERENCES
+            OUTPUT_DIR_INFERENCES,
+            manual_points=manual_points # <-- Pass manual points
         )
 
         if not success_homog:
@@ -106,7 +108,7 @@ def run_inference_task(input_video_path):
             "output_url": final_video_path,       
             "output_2d_url": final_2d_full_path, 
             "output_2d_zoom_url": final_2d_zoom_path,
-            "output_replay_url": final_replay_path, # <-- NEW
+            "output_replay_url": final_replay_path, 
             "message": "Line calling process complete."
         }
         print(f"Inference thread finished: {inference_status['status']}")
@@ -118,7 +120,7 @@ def run_inference_task(input_video_path):
             "output_url": None,
             "output_2d_url": None, 
             "output_2d_zoom_url": None,
-            "output_replay_url": None, # <-- NEW
+            "output_replay_url": None, 
             "message": str(e)
         }
 
@@ -263,6 +265,60 @@ def upload_for_inference_route():
     input_url = url_for('static', filename=f'uploads/{file.filename}')
     return jsonify({"success": True, "message": "File uploaded.", "input_path": input_url})
 
+# --- NEW: Route to get a specific frame from a video ---
+@app.route("/get_video_frame", methods=["POST"])
+def get_video_frame_route():
+    try:
+        data = request.get_json()
+        video_path = data.get('video_path')
+        frame_number = int(data.get('frame_number', 0))
+
+        if not video_path:
+            return jsonify({"success": False, "message": "No video_path provided."}), 400
+        
+        filesystem_path = os.path.join(os.getcwd(), video_path.lstrip('/'))
+        if not os.path.exists(filesystem_path):
+            return jsonify({"success": False, "message": "Video file not found."}), 404
+        
+        cap = cv2.VideoCapture(filesystem_path)
+        if not cap.isOpened():
+            return jsonify({"success": False, "message": "Could not open video file."}), 500
+        
+        # Set the frame position
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret:
+            return jsonify({"success": False, "message": "End of video or invalid frame."}), 404
+        
+        # Get frame dimensions
+        height, width, _ = frame.shape
+
+        # Encode frame as JPEG and send it
+        _, buffer = cv2.imencode('.jpg', frame)
+        img_io = io.BytesIO(buffer)
+        
+        # We need to send the image, but also return JSON.
+        # The best way is to save a temp frame and return the path.
+        frame_filename = f"temp_frame_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S%f')}.jpg"
+        frame_fs_path = os.path.join(OUTPUT_DIR_INFERENCES, frame_filename)
+        cv2.imwrite(frame_fs_path, frame)
+        
+        frame_web_path = os.path.join(os.path.basename(OUTPUT_DIR_INFERENCES), frame_filename)
+        
+        return jsonify({
+            "success": True,
+            "image_url": url_for('static', filename=frame_web_path),
+            "width": width,
+            "height": height
+        })
+
+    except Exception as e:
+        print(f"❌ Error in /get_video_frame: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# --- MODIFIED: Route to run inference (now accepts manual points) ---
 @app.route("/run_inference", methods=["POST"])
 def run_inference_route():
     """Starts the inference process in a background thread."""
@@ -272,11 +328,19 @@ def run_inference_route():
 
     data = request.get_json()
     input_path = data.get('input_path')
+    manual_points = data.get('manual_points') # Will be None if not provided
+
     if not input_path:
         return jsonify({"success": False, "message": "No input_path provided."}), 400
+    
+    if manual_points:
+        print(f"Received manual points: {manual_points}")
+    else:
+        print("No manual points, running in Auto-mode.")
 
     inference_status = {"status": "running", "output_url": None, "output_2d_url": None, "output_2d_zoom_url": None, "output_replay_url": None, "message": "Process starting..."}
-    thread = threading.Thread(target=run_inference_task, args=(input_path,), daemon=True)
+    # Pass manual_points to the thread
+    thread = threading.Thread(target=run_inference_task, args=(input_path, manual_points), daemon=True)
     thread.start()
     
     return jsonify({"success": True, "message": "Inference process started."})
@@ -295,7 +359,6 @@ def check_inference_status_route():
             status_copy["output_2d_url"] = url_for('static', filename=status_copy["output_2d_url"])
         if status_copy.get("output_2d_zoom_url"):
             status_copy["output_2d_zoom_url"] = url_for('static', filename=status_copy["output_2d_zoom_url"])
-        # --- NEW: Build the replay video URL ---
         if status_copy.get("output_replay_url"):
             status_copy["output_replay_url"] = url_for('static', filename=status_copy["output_replay_url"])
             

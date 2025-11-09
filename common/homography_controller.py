@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import os
-import subprocess # <-- NEW
+import subprocess
 from ultralytics import YOLO
 from tqdm import tqdm
 
@@ -26,6 +26,14 @@ COURT_TEMPLATE = {
     "doubles_long_service_line": ((286, 2935 - 135), (1379, 2935 - 135)), # (286, 2800) -> (1379, 2800)
     "center_line": ((833, 2935), (833, 2935 - 836)), # (833, 2935) -> (833, 2099)
 }
+# --- TEMPLATE POINTS for homography ---
+# Order: Top-Left, Top-Right, Bottom-Left, Bottom-Right
+TEMPLATE_PTS_HOMOGRAPHY = np.array([
+    COURT_TEMPLATE["baseline_bottom"][0],
+    COURT_TEMPLATE["baseline_bottom"][1],
+    COURT_TEMPLATE["front_service_line"][0],
+    COURT_TEMPLATE["front_service_line"][1]
+], dtype=np.float32)
 
 # --- 2D IMAGE CONSTANTS ---
 W_2D = 1665
@@ -226,7 +234,7 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
     """
     Creates a slow-motion, zoomed-in replay clip of the landing.
     """
-    raw_output_path = None # Initialize to avoid reference before assignment in case of error
+    raw_output_path = None # Initialize
     try:
         cap = cv2.VideoCapture(original_video_path)
         if not cap.isOpened():
@@ -244,7 +252,7 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         start_frame = max(0, landing_frame - FRAMES_BEFORE)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         
-        # --- MODIFICATION: Set raw and web paths ---
+        # --- MODIFIED: Set raw and web paths ---
         raw_filename = f"raw_replay_{os.path.splitext(base_filename)[0]}.mp4"
         raw_output_path = os.path.join(output_dir, raw_filename)
         
@@ -323,35 +331,23 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         return None
 
 # --- Step 2: Main Video + YOLO + Homography ---
-def run_homography_check(video_path, csv_path, output_dir):
+def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
     """
     Runs YOLO homography check on a video using a TFLite CSV.
-    Returns (True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path) on success,
-    or (False, error_message, None, None, None) on failure.
+    Can accept optional manual_points to bypass YOLO detection.
     """
     web_2d_full_path = None
     web_2d_zoom_path = None
     web_replay_path = None
     raw_output_path = None # Initialize
+    H = None
+    H_inv = None
+    
     try:
         # Get landing point
         landing_point, landing_frame, total_frames = get_landing_point(csv_path)
         if landing_point is None:
             return False, "No valid landing point found in CSV. Cannot determine IN/OUT.", None, None, None
-
-        # Load YOLO model
-        if not os.path.exists(MODEL_PATH):
-            return False, f"YOLO model not found at {MODEL_PATH}. Please place it in the root directory.", None, None, None
-        model = YOLO(MODEL_PATH)
-        print("✅ YOLO model loaded successfully.")
-
-        # Reference pts for homography
-        template_pts = np.array([
-            COURT_TEMPLATE["baseline_bottom"][0],
-            COURT_TEMPLATE["baseline_bottom"][1],
-            COURT_TEMPLATE["front_service_line"][0],
-            COURT_TEMPLATE["front_service_line"][1]
-        ], dtype=np.float32)
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -360,24 +356,86 @@ def run_homography_check(video_path, csv_path, output_dir):
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS)
+
+        # --- NEW: Handle Homography (Auto vs Semi-Auto) ---
+        if manual_points:
+            print("✅ Using manual homography points.")
+            detected_pts = np.array(manual_points, dtype=np.float32)
+            H, _ = cv2.findHomography(TEMPLATE_PTS_HOMOGRAPHY, detected_pts)
+            H_inv = np.linalg.inv(H)
+        else:
+            print("✅ Running automatic YOLO court detection...")
+            if not os.path.exists(MODEL_PATH):
+                return False, f"YOLO model not found at {MODEL_PATH}. Please place it in the root directory.", None, None, None
+            model = YOLO(MODEL_PATH)
+            
+            # Find homography from the first few frames
+            for _ in range(int(fps * 3)): # Try for 3 seconds
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                results = model(frame, conf=CONFIDENCE_THRESHOLD, stream=True, verbose=False)
+                for r in results:
+                    boxes = r.boxes
+                    if boxes is not None and len(boxes) > 0:
+                        cls = boxes.cls.cpu().numpy().astype(int)
+                        conf = boxes.conf.cpu().numpy()
+                        xyxy = boxes.xyxy.cpu().numpy()
+                        centers = [(int((x1+x2)/2), int((y1+y2)/2)) for x1, y1, x2, y2 in xyxy]
+
+                        R1 = [(c, p) for c, p, cid in zip(conf, centers, cls) if cid == 2]
+                        R3 = [(c, p) for c, p, cid in zip(conf, centers, cls) if cid == 3]
+                        R1.sort(reverse=True, key=lambda x: x[0])
+                        R3.sort(reverse=True, key=lambda x: x[0])
+
+                        if len(R1) >= 2 and len(R3) >= 2:
+                            detected_pts = np.array([R1[0][1], R1[1][1], R3[0][1], R3[1][1]], dtype=np.float32)
+                            H, _ = cv2.findHomography(TEMPLATE_PTS_HOMOGRAPHY, detected_pts)
+                            H_inv = np.linalg.inv(H) 
+                            print("✅ Auto-homography computed.")
+                            break # Exit loop once H is found
+                if H is not None:
+                    break
+            
+            if H is None:
+                cap.release()
+                return False, "Automatic court detection failed. Try Semi-Auto mode.", None, None, None
+
+        # Reset video capture to frame 0 for processing
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         
         base_filename = os.path.basename(video_path)
         
-        # --- MODIFICATION: Set raw and web paths ---
+        # --- Setup Video Writers (Raw and Web) ---
         raw_filename = f"raw_annotated_{base_filename}"
         raw_output_path = os.path.join(output_dir, raw_filename)
-        
         web_filename = f"yolo_homog_{base_filename}"
         web_output_path = os.path.join(output_dir, web_filename)
         
         fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Write raw file
         out = cv2.VideoWriter(raw_output_path, fourcc, fps, (width, height))
         if not out.isOpened():
+             cap.release()
              return False, f"Could not create VideoWriter at {raw_output_path}", None, None, None
 
-        H = None
-        H_inv = None 
+        # --- Pre-calculate mapped lines and intersection points ---
+        mapped_lines = {}
+        for name, (p1, p2) in COURT_TEMPLATE.items():
+            line = np.array([[p1, p2]], dtype=np.float32)
+            mapped_line = cv2.perspectiveTransform(line, H)[0]
+            mapped_lines[name] = (tuple(mapped_line[0]), tuple(mapped_line[1]))
+
+        i1 = line_intersection(*mapped_lines["baseline_bottom"], *mapped_lines["left_inner_line"])
+        i2 = line_intersection(*mapped_lines["baseline_bottom"], *mapped_lines["right_inner_line"])
+        i3 = line_intersection(*mapped_lines["net"], *mapped_lines["left_inner_line"])
+        i4 = line_intersection(*mapped_lines["net"], *mapped_lines["right_inner_line"])
+        
         intersection_pts = None
+        if all([i1, i2, i3, i4]):
+            intersection_pts = np.array([i1, i2, i4, i3], dtype=np.int32)
+            print("✅ IN/OUT zone (singles) points:", intersection_pts.tolist())
+
+        # --- Process Video ---
         frame_idx = 0
         show_result = False
         in_zone = False
@@ -389,85 +447,45 @@ def run_homography_check(video_path, csv_path, output_dir):
                 pbar.update(total_frames - frame_idx) 
                 break
 
-            results = model(frame, conf=CONFIDENCE_THRESHOLD, stream=True, verbose=False)
             annotated_frame = frame.copy() 
 
-            for r in results:
-                annotated_frame = r.plot() 
-                boxes = r.boxes
-                if boxes is not None and len(boxes) > 0:
-                    cls = boxes.cls.cpu().numpy().astype(int)
-                    conf = boxes.conf.cpu().numpy()
-                    xyxy = boxes.xyxy.cpu().numpy()
-                    centers = [(int((x1+x2)/2), int((y1+y2)/2)) for x1, y1, x2, y2 in xyxy]
+            # Draw ALL court lines from template
+            for name, (p1, p2) in mapped_lines.items():
+                cv2.line(annotated_frame, tuple(np.int32(p1)), tuple(np.int32(p2)), (255, 255, 0), 2)
 
-                    R1 = [(c, p) for c, p, cid in zip(conf, centers, cls) if cid == 2]
-                    R3 = [(c, p) for c, p, cid in zip(conf, centers, cls) if cid == 3]
-                    R1.sort(reverse=True, key=lambda x: x[0])
-                    R3.sort(reverse=True, key=lambda x: x[0])
+            # Draw red "IN" quadrilateral
+            if intersection_pts is not None:
+                cv2.polylines(annotated_frame, [intersection_pts.reshape(-1, 1, 2)], True, (0, 0, 255), 3)
 
-                    if len(R1) >= 2 and len(R3) >= 2 and H is None:
-                        detected_pts = np.array([R1[0][1], R1[1][1], R3[0][1], R3[1][1]], dtype=np.float32)
-                        H, _ = cv2.findHomography(template_pts, detected_pts)
-                        H_inv = np.linalg.inv(H) 
-                        print("✅ Homography computed.")
-
-                        # Map template lines
-                        mapped = {}
-                        for name, (p1, p2) in COURT_TEMPLATE.items():
-                            line = np.array([[p1, p2]], dtype=np.float32)
-                            mapped_line = cv2.perspectiveTransform(line, H)[0]
-                            mapped[name] = (tuple(mapped_line[0]), tuple(mapped_line[1]))
-
-                        # Find intersections for "IN" (singles) quadrilateral
-                        i1 = line_intersection(*mapped["baseline_bottom"], *mapped["left_inner_line"])
-                        i2 = line_intersection(*mapped["baseline_bottom"], *mapped["right_inner_line"])
-                        i3 = line_intersection(*mapped["net"], *mapped["left_inner_line"])
-                        i4 = line_intersection(*mapped["net"], *mapped["right_inner_line"])
-                        if all([i1, i2, i3, i4]):
-                            intersection_pts = np.array([i1, i2, i4, i3], dtype=np.int32)
-                            print("✅ IN/OUT zone (singles) points:", intersection_pts.tolist())
-
-                # Draw ALL court lines from template
-                if H is not None:
-                    for name, (p1, p2) in COURT_TEMPLATE.items():
-                        line = np.array([[p1, p2]], dtype=np.float32)
-                        dst = cv2.perspectiveTransform(line, H)[0]
-                        cv2.line(annotated_frame, tuple(dst[0].astype(int)), tuple(dst[1].astype(int)), (255, 255, 0), 2)
-
-                # Draw red "IN" quadrilateral
-                if intersection_pts is not None:
-                    cv2.polylines(annotated_frame, [intersection_pts.reshape(-1, 1, 2)], True, (0, 0, 255), 3)
-
-                    # Once the landing frame is reached, compute IN/OUT once
-                    if frame_idx >= landing_frame and not show_result:
-                        in_zone = point_in_polygon(landing_point, intersection_pts)
-                        show_result = True
-                        print(f"🏸 Shuttle {'IN' if in_zone else 'OUT'} detected at frame {frame_idx}")
+                # Once the landing frame is reached, compute IN/OUT once
+                if frame_idx >= landing_frame and not show_result:
+                    in_zone = point_in_polygon(landing_point, intersection_pts)
+                    show_result = True
+                    print(f"🏸 Shuttle {'IN' if in_zone else 'OUT'} detected at frame {frame_idx}")
+                    
+                    if H_inv is not None:
+                        lp_array = np.array([[landing_point]], dtype=np.float32)
+                        lp_2d_array = cv2.perspectiveTransform(lp_array, H_inv)
+                        lp_2d = tuple(lp_2d_array[0][0].astype(int))
+                        print(f"✅ Mapped 2D landing point: {lp_2d}")
                         
-                        if H_inv is not None:
-                            lp_array = np.array([[landing_point]], dtype=np.float32)
-                            lp_2d_array = cv2.perspectiveTransform(lp_array, H_inv)
-                            lp_2d = tuple(lp_2d_array[0][0].astype(int))
-                            print(f"✅ Mapped 2D landing point: {lp_2d}")
-                            
-                            web_2d_full_path = generate_2d_illustration_full(
-                                lp_2d, in_zone, output_dir, base_filename
-                            )
-                            web_2d_zoom_path = generate_2d_illustration_zoom(
-                                lp_2d, in_zone, output_dir, base_filename
-                            )
-                            web_replay_path = create_slow_zoom_replay(
-                                video_path, landing_frame, landing_point, output_dir, base_filename, fps
-                            )
+                        web_2d_full_path = generate_2d_illustration_full(
+                            lp_2d, in_zone, output_dir, base_filename
+                        )
+                        web_2d_zoom_path = generate_2d_illustration_zoom(
+                            lp_2d, in_zone, output_dir, base_filename
+                        )
+                        web_replay_path = create_slow_zoom_replay(
+                            video_path, landing_frame, landing_point, output_dir, base_filename, fps
+                        )
 
-                    # Draw only after landing frame
-                    if show_result:
-                        text = "Shuttle IN" if in_zone else "Shuttle OUT"
-                        color = (0, 255, 0) if in_zone else (0, 0, 255)
-                        cv2.putText(annotated_frame, text, (width - 300, 50),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3, cv2.LINE_AA)
-                        cv2.circle(annotated_frame, landing_point, 12, (255, 0, 0), -1)
+                # Draw only after landing frame
+                if show_result:
+                    text = "Shuttle IN" if in_zone else "Shuttle OUT"
+                    color = (0, 255, 0) if in_zone else (0, 0, 255)
+                    cv2.putText(annotated_frame, text, (width - 300, 50),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3, cv2.LINE_AA)
+                    cv2.circle(annotated_frame, landing_point, 12, (255, 0, 0), -1)
 
             out.write(annotated_frame)
             frame_idx += 1
