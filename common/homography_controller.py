@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import os
+import subprocess # <-- NEW
 from ultralytics import YOLO
 from tqdm import tqdm
 
@@ -220,11 +221,12 @@ def generate_2d_illustration_zoom(landing_point_2d, in_zone, output_dir, base_fi
         print(f"❌ Error generating 2D zoom illustration: {e}")
         return None
 
-# --- NEW: Function to create slow-motion zoom replay ---
+# --- Function to create slow-motion zoom replay ---
 def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps):
     """
     Creates a slow-motion, zoomed-in replay clip of the landing.
     """
+    raw_output_path = None # Initialize to avoid reference before assignment in case of error
     try:
         cap = cv2.VideoCapture(original_video_path)
         if not cap.isOpened():
@@ -242,14 +244,18 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         start_frame = max(0, landing_frame - FRAMES_BEFORE)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         
-        # Create VideoWriter
-        output_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_replay.mp4"
-        output_video_path = os.path.join(output_dir, output_filename)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_video_path, fourcc, fps, FINAL_REPLAY_SIZE)
+        # --- MODIFICATION: Set raw and web paths ---
+        raw_filename = f"raw_replay_{os.path.splitext(base_filename)[0]}.mp4"
+        raw_output_path = os.path.join(output_dir, raw_filename)
+        
+        web_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_replay.mp4"
+        web_output_path = os.path.join(output_dir, web_filename)
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Write raw file with mp4v
+        out = cv2.VideoWriter(raw_output_path, fourcc, fps, FINAL_REPLAY_SIZE)
 
         if not out.isOpened():
-             print(f"❌ Error: Could not create VideoWriter for replay at {output_video_path}")
+             print(f"❌ Error: Could not create VideoWriter for replay at {raw_output_path}")
              cap.release()
              return None
 
@@ -280,14 +286,40 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         cap.release()
         out.release()
         
-        web_video_path = os.path.join(os.path.basename(output_dir), output_filename)
-        print(f"✅ Slow-mo replay saved to: {output_video_path}")
-        return web_video_path
+        # --- NEW: Re-encode with ffmpeg for web compatibility ---
+        print(f"Re-encoding replay video for web...")
+        command = [
+            'ffmpeg',
+            '-y',
+            '-i', raw_output_path,
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-pix_fmt', 'yuv420p',
+            web_output_path
+        ]
+        
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            print(f"✅ Slow-mo replay saved to: {web_output_path}")
+            os.remove(raw_output_path) # Clean up raw file
+            
+            # Return web-accessible path
+            web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
+            return web_video_path
+        
+        except subprocess.CalledProcessError as e:
+            print(f"❌ ERROR: ffmpeg re-encoding failed for replay.")
+            print(f"ffmpeg stderr: {e.stderr}")
+            if os.path.exists(raw_output_path):
+                os.remove(raw_output_path)
+            return None
         
     except Exception as e:
         print(f"❌ Error creating slow-mo replay: {e}")
         if 'cap' in locals() and cap.isOpened(): cap.release()
         if 'out' in locals() and out.isOpened(): out.release()
+        if raw_output_path and os.path.exists(raw_output_path):
+             os.remove(raw_output_path) # Cleanup on error
         return None
 
 # --- Step 2: Main Video + YOLO + Homography ---
@@ -300,6 +332,7 @@ def run_homography_check(video_path, csv_path, output_dir):
     web_2d_full_path = None
     web_2d_zoom_path = None
     web_replay_path = None
+    raw_output_path = None # Initialize
     try:
         # Get landing point
         landing_point, landing_frame, total_frames = get_landing_point(csv_path)
@@ -329,12 +362,18 @@ def run_homography_check(video_path, csv_path, output_dir):
         fps = cap.get(cv2.CAP_PROP_FPS)
         
         base_filename = os.path.basename(video_path)
-        output_filename = f"yolo_homog_{base_filename}"
-        output_video_path = os.path.join(output_dir, output_filename)
         
-        out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+        # --- MODIFICATION: Set raw and web paths ---
+        raw_filename = f"raw_annotated_{base_filename}"
+        raw_output_path = os.path.join(output_dir, raw_filename)
+        
+        web_filename = f"yolo_homog_{base_filename}"
+        web_output_path = os.path.join(output_dir, web_filename)
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Write raw file
+        out = cv2.VideoWriter(raw_output_path, fourcc, fps, (width, height))
         if not out.isOpened():
-             return False, f"Could not create VideoWriter at {output_video_path}", None, None, None
+             return False, f"Could not create VideoWriter at {raw_output_path}", None, None, None
 
         H = None
         H_inv = None 
@@ -412,7 +451,6 @@ def run_homography_check(video_path, csv_path, output_dir):
                             lp_2d = tuple(lp_2d_array[0][0].astype(int))
                             print(f"✅ Mapped 2D landing point: {lp_2d}")
                             
-                            # --- MODIFIED: Call all 3 generation functions ---
                             web_2d_full_path = generate_2d_illustration_full(
                                 lp_2d, in_zone, output_dir, base_filename
                             )
@@ -438,15 +476,40 @@ def run_homography_check(video_path, csv_path, output_dir):
         pbar.close()
         cap.release()
         out.release()
-        print(f"✅ Output video saved to: {output_video_path}")
+        print(f"✅ Raw annotated video saved to: {raw_output_path}")
         
-        web_video_path = os.path.join(os.path.basename(output_dir), os.path.basename(output_video_path))
-        # --- MODIFIED: Return all 4 paths ---
-        return True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path 
+        # --- NEW: Re-encode with ffmpeg for web compatibility ---
+        print(f"Re-encoding annotated video for web...")
+        command = [
+            'ffmpeg',
+            '-y',
+            '-i', raw_output_path,
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-pix_fmt', 'yuv420p',
+            web_output_path
+        ]
+        
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            print(f"✅ Web-compatible annotated video saved to: {web_output_path}")
+            os.remove(raw_output_path) # Clean up raw file
+            
+            web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
+            return True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path
+        
+        except subprocess.CalledProcessError as e:
+            print(f"❌ ERROR: ffmpeg re-encoding failed for annotated video.")
+            print(f"ffmpeg stderr: {e.stderr}")
+            if os.path.exists(raw_output_path):
+                os.remove(raw_output_path)
+            return False, "FFmpeg re-encoding failed", None, None, None
 
     except Exception as e:
         print(f"❌ Error during homography processing: {e}")
         if 'cap' in locals() and cap.isOpened(): cap.release()
         if 'out' in locals() and out.isOpened(): out.release()
         if 'pbar' in locals(): pbar.close()
+        if raw_output_path and os.path.exists(raw_output_path):
+             os.remove(raw_output_path) # Cleanup on error
         return False, str(e), None, None, None
