@@ -39,10 +39,13 @@
             position: relative;
             max-width: 100%;
             cursor: crosshair;
+            background-color: #eee;
+            min-height: 200px; /* Placeholder height */
         }
         #frame-display-container img {
             max-width: 100%;
             height: auto;
+            display: block;
         }
         #frame-canvas {
             position: absolute;
@@ -55,6 +58,7 @@
             font-weight: bold;
             color: #0d6efd;
             margin: 10px 0;
+            font-size: 1.1em;
         }
         #runSemiAutoBtn {
             background-color: #198754;
@@ -84,8 +88,7 @@
             <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*">
             <hr>
             <button id="autoRunBtn">Upload & Auto-Run Inference</button>
-            <button id="semiAutoUploadBtn">Upload for Semi-Auto</button>
-        </div>
+            <button id="semiAutoUploadBtn">Upload & Semi-Auto Inference</button> </div>
         
         <div id="semi-auto-controls">
             <h2>Semi-Auto Marking</h2>
