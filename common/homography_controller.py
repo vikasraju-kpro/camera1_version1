@@ -467,6 +467,9 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         if not cap.isOpened():
             return False, f"Cannot open video file: {video_path}", None, None, None
 
+        # Set buffer size to reduce I/O overhead
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -589,7 +592,11 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
 
             # Only annotate frames from landing frame onwards (much faster)
             if frame_idx >= draw_overlay_start:
-                annotated_frame = cv2.addWeighted(frame, 1.0, base_overlay, 0.7, 0)
+                # Use faster blending - copy frame and add overlay (faster than addWeighted)
+                annotated_frame = frame.copy()
+                # Use bitwise OR for faster overlay (works for binary-like overlays)
+                mask = cv2.cvtColor(base_overlay, cv2.COLOR_BGR2GRAY) > 0
+                annotated_frame[mask] = base_overlay[mask]
                 
                 # Once the landing frame is reached, compute IN/OUT once
                 if frame_idx == landing_frame and not show_result:

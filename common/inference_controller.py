@@ -46,13 +46,18 @@ def _postprocess_frame(args):
         # Last frame case - no prediction
         return None
     
-    img = frame.copy()
+    # Only copy if we need to modify (optimization)
     cx_pred, cy_pred = get_object_center(heatmap)
     cx_pred_orig, cy_pred_orig = int(ratio * cx_pred), int(ratio * cy_pred)
     vis = 1 if cx_pred > 0 or cy_pred > 0 else 0
     
     if vis == 1:
+        # Only copy if we need to draw
+        img = frame.copy()
         cv2.circle(img, (cx_pred_orig, cy_pred_orig), 5, (0, 0, 255), -1)
+    else:
+        # No modification needed, use original frame
+        img = frame
     
     csv_line = f'{frame_idx},{vis},{cx_pred_orig},{cy_pred_orig}\n'
     return img, csv_line
@@ -88,6 +93,9 @@ def run_inference_on_video(input_video_path, output_dir):
         error_msg = f"Error: Could not open video file {input_video_path}"
         print(f"❌ {error_msg}")
         return False, error_msg, None # <-- MODIFIED
+    
+    # Set buffer size to reduce I/O overhead
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -163,8 +171,11 @@ def run_inference_on_video(input_video_path, output_dir):
                 batch_input = np.array(batch_input_list, dtype=np.float32) / 255.0
 
                 # Model inference (keep sequential - TFLite may not be thread-safe)
-                interpreter.resize_tensor_input(input_details[0]['index'], batch_input.shape)
-                interpreter.allocate_tensors()
+                # Only resize/allocate if batch size changed (optimization)
+                current_shape = interpreter.get_input_details()[0]['shape']
+                if list(current_shape) != list(batch_input.shape):
+                    interpreter.resize_tensor_input(input_details[0]['index'], batch_input.shape)
+                    interpreter.allocate_tensors()
                 interpreter.set_tensor(input_details[0]['index'], batch_input)
                 interpreter.invoke()
                 y_pred = interpreter.get_tensor(output_details[0]['index'])
