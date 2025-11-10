@@ -524,13 +524,13 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         web_filename = f"yolo_homog_{base_filename}"
         web_output_path = os.path.join(output_dir, web_filename)
         
-        # Use H.264 codec directly (faster than mp4v, and we'll re-encode anyway)
-        # Try different codecs for best compatibility
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 codec
+        # Use mp4v codec (most compatible, especially on Raspberry Pi)
+        # Hardware H.264 encoders may not be available, so use software codec
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(web_output_path, fourcc, fps, (width, height))
         if not out.isOpened():
-            # Fallback to mp4v if avc1 doesn't work
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            # Try XVID as fallback
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
             out = cv2.VideoWriter(web_output_path, fourcc, fps, (width, height))
             if not out.isOpened():
                 cap.release()
@@ -630,8 +630,8 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         print(f"✅ Annotated video saved to: {web_output_path}")
         
         # Re-encode with ffmpeg for web compatibility (only if needed)
-        # Check if file is already web-compatible, if not re-encode
-        temp_output = web_output_path + ".temp"
+        # Use .mp4 extension for temp file so ffmpeg can detect format
+        temp_output = os.path.splitext(web_output_path)[0] + "_temp.mp4"
         command = [
             'ffmpeg',
             '-y',
@@ -639,6 +639,7 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             '-c:v', 'libx264',
             '-preset', 'ultrafast',  # Use ultrafast for speed
             '-pix_fmt', 'yuv420p',
+            '-f', 'mp4',  # Explicitly specify format
             '-movflags', '+faststart',  # Enable fast start for web playback
             temp_output
         ]
