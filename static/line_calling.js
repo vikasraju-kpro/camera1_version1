@@ -435,7 +435,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateStatus(result.message || 'Processing... please wait.');
             } else if (result.status === 'complete') {
                 clearInterval(statusInterval); 
-                updateStatus(result.message, false);
+                if (typeof result.run_time_seconds === 'number') {
+                    updateStatus(`${result.message} (Total: ${result.run_time_seconds.toFixed(1)}s)`, false);
+                } else {
+                    updateStatus(result.message, false);
+                }
                 
                 displayVideo(result.output_url); 
                 

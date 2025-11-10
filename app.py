@@ -4,6 +4,7 @@ import glob
 import threading 
 import cv2 # <-- NEW
 import io # <-- NEW
+import time
 from flask import Flask, render_template, jsonify, url_for, request, send_file, send_file
 
 from common.camera_controller import (
@@ -68,6 +69,7 @@ def run_inference_task(input_video_path, manual_points=None):
     """
     global inference_status
     try:
+        start_time = time.time()
         filesystem_path = os.path.join(os.getcwd(), input_video_path.lstrip('/'))
         # Derive a path relative to the Flask static folder so the frontend can render it if needed
         static_relative_input_path = None
@@ -116,13 +118,16 @@ def run_inference_task(input_video_path, manual_points=None):
         print(f"--- Homography step complete. Final video at: {final_video_path} ---")
 
         # --- STAGE 3: Set final status ---
+        total_time = time.time() - start_time
+        print(f"⏱️ Total inference time: {total_time:.2f}s")
         inference_status = {
             "status": "complete",
             "output_url": final_video_path,       
             "output_2d_url": final_2d_full_path, 
             "output_2d_zoom_url": final_2d_zoom_path,
             "output_replay_url": final_replay_path, 
-            "message": "Line calling process complete."
+            "message": "Line calling process complete.",
+            "run_time_seconds": round(total_time, 2)
         }
         print(f"Inference thread finished: {inference_status['status']}")
 
@@ -141,23 +146,28 @@ def run_inference_task(input_video_path, manual_points=None):
         ]
         should_fallback = any(p in err_lower for p in fallback_phrases)
         if should_fallback and static_relative_input_path:
+            total_time = time.time() - start_time
             print("⚠️ No valid result from inference. Falling back to original input clip.")
+            print(f"⏱️ Total inference time (fallback): {total_time:.2f}s")
             inference_status = {
                 "status": "complete",
                 "output_url": static_relative_input_path,
                 "output_2d_url": None, 
                 "output_2d_zoom_url": None,
                 "output_replay_url": None, 
-                "message": "No valid result from inference. Showing original clip."
+                "message": "No valid result from inference. Showing original clip.",
+                "run_time_seconds": round(total_time, 2)
             }
         else:
+            total_time = time.time() - start_time
             inference_status = {
                 "status": "error",
                 "output_url": None,
                 "output_2d_url": None, 
                 "output_2d_zoom_url": None,
                 "output_replay_url": None, 
-                "message": str(e)
+                "message": str(e),
+                "run_time_seconds": round(total_time, 2)
             }
 
 

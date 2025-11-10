@@ -243,9 +243,11 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
 
         # Define clip parameters
         FRAMES_BEFORE = 15
-        FRAMES_AFTER = 15
-        CLIP_DURATION = FRAMES_BEFORE + FRAMES_AFTER
         SLOWMO_FACTOR = 4 # Write each frame 4 times
+        # Extend output duration by +2 seconds (post-landing), accounting for slow motion factor
+        extra_original_frames = max(1, int(round((2.0 * fps) / SLOWMO_FACTOR)))
+        FRAMES_AFTER = 15 + extra_original_frames
+        CLIP_DURATION = FRAMES_BEFORE + FRAMES_AFTER
         ZOOM_BOX_SIZE = 200 # 400x400 box
         FINAL_REPLAY_SIZE = (600, 600)
 
