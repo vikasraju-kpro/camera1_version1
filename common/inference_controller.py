@@ -11,17 +11,22 @@ HEIGHT = 256
 WIDTH = 448
 SEQ_LEN = 8
 IN_CHANNELS = (SEQ_LEN + 1) * 3
-BATCH_SIZE = 8
+BATCH_SIZE = 16  # Increased batch size for better throughput
 TFLITE_MODEL_PATH = 'tracknet_trained.int8.tflite' # Assumes model is in the root project dir
 
 def get_object_center(heatmap):
-    """Calculates the center of the largest contour in a binary heatmap."""
-    h_pred = (heatmap > 0.5).astype(np.uint8) * 255
+    """Calculates the center of the largest contour in a binary heatmap (optimized)."""
+    # Use threshold directly without full conversion for speed
+    h_pred = (heatmap > 0.5).astype(np.uint8)
     if np.sum(h_pred) == 0:
         return 0, 0
+    
+    # Use RETR_EXTERNAL and CHAIN_APPROX_SIMPLE for faster contour detection
     cnts, _ = cv2.findContours(h_pred, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not cnts:
         return 0, 0
+    
+    # Find largest contour by area (optimized)
     largest_contour = max(cnts, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(largest_contour)
     cx_pred = int(x + w / 2)
@@ -115,9 +120,9 @@ def run_inference_on_video(input_video_path, output_dir):
     frame_count = 0
     pbar = tqdm(total=total_frames, desc=f"Inferring {base_filename}")
     
-    # Determine number of worker threads (use CPU count, but cap at 4 for memory efficiency)
+    # Determine number of worker threads (use CPU count, but cap at 6 for better parallelism)
     import multiprocessing
-    num_workers = min(4, multiprocessing.cpu_count())
+    num_workers = min(6, multiprocessing.cpu_count())
     
     video_ended = False
     try:

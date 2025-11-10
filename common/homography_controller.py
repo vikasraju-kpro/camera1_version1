@@ -569,29 +569,30 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             mapped_lines_int[name] = (tuple(np.int32(p1)), tuple(np.int32(p2)))
 
         pbar = tqdm(total=total_frames, desc="YOLO Homography")
+        
+        # Pre-create a base overlay image with court lines (draw once, reuse)
+        # This avoids redrawing lines on every frame
+        base_overlay = np.zeros((height, width, 3), dtype=np.uint8)
+        for name, (p1, p2) in mapped_lines_int.items():
+            cv2.line(base_overlay, p1, p2, (255, 255, 0), 2)
+        if intersection_pts_int is not None:
+            cv2.polylines(base_overlay, [intersection_pts_int], True, (0, 0, 255), 3)
+        
+        # Only draw overlay on frames after landing (before that, just copy frames)
+        draw_overlay_start = landing_frame if landing_frame is not None else total_frames
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 pbar.update(total_frames - frame_idx) 
                 break
 
-            # Use frame directly instead of copying when possible (faster)
-            # Only copy if we need to modify it
-            if intersection_pts is not None or mapped_lines:
-                annotated_frame = frame.copy()
-            else:
-                annotated_frame = frame
-
-            # Draw ALL court lines from template (optimized with pre-converted points)
-            for name, (p1, p2) in mapped_lines_int.items():
-                cv2.line(annotated_frame, p1, p2, (255, 255, 0), 2)
-
-            # Draw red "IN" quadrilateral
-            if intersection_pts_int is not None:
-                cv2.polylines(annotated_frame, [intersection_pts_int], True, (0, 0, 255), 3)
-
+            # Only annotate frames from landing frame onwards (much faster)
+            if frame_idx >= draw_overlay_start:
+                annotated_frame = cv2.addWeighted(frame, 1.0, base_overlay, 0.7, 0)
+                
                 # Once the landing frame is reached, compute IN/OUT once
-                if frame_idx >= landing_frame and not show_result:
+                if frame_idx == landing_frame and not show_result:
                     in_zone = point_in_polygon(landing_point, intersection_pts)
                     show_result = True
                     print(f"🏸 Shuttle {'IN' if in_zone else 'OUT'} detected at frame {frame_idx}")
@@ -612,15 +613,19 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
                             video_path, landing_frame, landing_point, output_dir, base_filename, fps
                         )
 
-                # Draw only after landing frame
+                # Draw text and circle only after landing frame
                 if show_result:
                     text = "Shuttle IN" if in_zone else "Shuttle OUT"
                     color = (0, 255, 0) if in_zone else (0, 0, 255)
                     cv2.putText(annotated_frame, text, (width - 300, 50),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3, cv2.LINE_AA)
                     cv2.circle(annotated_frame, landing_point, 12, (255, 0, 0), -1)
+                
+                out.write(annotated_frame)
+            else:
+                # Before landing frame, just write original frame (much faster)
+                out.write(frame)
 
-            out.write(annotated_frame)
             frame_idx += 1
             pbar.update(1)
 
