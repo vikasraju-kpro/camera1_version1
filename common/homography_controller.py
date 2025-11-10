@@ -277,13 +277,14 @@ def create_full_slowmotion_video(original_video_path, output_dir, base_filename)
         original_fps = cap.get(cv2.CAP_PROP_FPS)
         cap.release()
         
-        # For 8x slow motion: setpts slows timestamps, fps filter sets output to 1/8 speed
-        output_fps = original_fps / SLOWMO_FACTOR  # Output at 1/8 the original fps for proper slow motion
+        # For 8x slow motion: setpts slows timestamps by 8x, output at original fps
+        # This makes the video play 8x slower while maintaining smooth playback
         command = [
             'ffmpeg',
             '-y',
             '-i', original_video_path,
-            '-filter:v', f'setpts={SLOWMO_FACTOR}*PTS,fps={output_fps}',
+            '-filter:v', f'setpts={SLOWMO_FACTOR}*PTS',
+            '-r', str(original_fps),  # Output at original fps - setpts makes it play slower
             '-an',  # Remove audio
             '-c:v', 'libx264',
             '-preset', 'fast',
@@ -351,15 +352,16 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         print(f"--- Creating slow-mo replay using ffmpeg (fast method) ---")
         
         # Use ffmpeg to extract, crop, zoom, and slow down in one pass
-        # For 8x slow motion: setpts slows timestamps, fps filter sets output to 1/8 speed
-        output_fps = fps / SLOWMO_FACTOR  # Output at 1/8 the original fps for proper slow motion
+        # For 8x slow motion: setpts slows timestamps by 8x, output at original fps
+        # This makes the video play 8x slower while maintaining smooth playback
         command = [
             'ffmpeg',
             '-y',
             '-ss', str(start_time_seconds),  # Seek to start frame
             '-i', original_video_path,
             '-t', str(clip_duration_seconds),  # Duration of clip
-            '-filter:v', f'crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={FINAL_REPLAY_SIZE}:{FINAL_REPLAY_SIZE},setpts={SLOWMO_FACTOR}*PTS,fps={output_fps}',
+            '-filter:v', f'crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={FINAL_REPLAY_SIZE}:{FINAL_REPLAY_SIZE},setpts={SLOWMO_FACTOR}*PTS',
+            '-r', str(fps),  # Output at original fps - setpts makes it play slower
             '-an',  # Remove audio
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
