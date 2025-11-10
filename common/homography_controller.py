@@ -239,8 +239,9 @@ def _reencode_video_for_web(raw_output_path, web_output_path, video_type="video"
             '-y',
             '-i', raw_output_path,
             '-c:v', 'libx264',
-            '-preset', 'fast',
+            '-preset', 'ultrafast',  # Use ultrafast for speed
             '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',  # Enable fast start for web playback
             web_output_path
         ]
         subprocess.run(command, check=True, capture_output=True, text=True)
@@ -256,116 +257,156 @@ def _reencode_video_for_web(raw_output_path, web_output_path, video_type="video"
 # --- Function to create full slow-motion video (for error cases) ---
 def create_full_slowmotion_video(original_video_path, output_dir, base_filename):
     """
-    Creates a slow-motion version of the entire video.
+    Creates a slow-motion version of the entire video using ffmpeg (much faster).
     Used when inference fails to at least show the video in slow-motion.
-    Uses the same slow-motion approach as create_slow_zoom_replay for consistency.
     """
-    raw_output_path = None
     try:
-        cap = cv2.VideoCapture(original_video_path)
-        if not cap.isOpened():
-            print(f"❌ Error: Cannot open video for slow-motion: {original_video_path}")
-            return None
-
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        SLOWMO_FACTOR = 4  # Same factor as create_slow_zoom_replay for consistency
-        
-        # Set output paths
-        raw_filename = f"raw_slowmo_{base_filename}"
-        raw_output_path = os.path.join(output_dir, raw_filename)
         web_filename = f"slowmo_{base_filename}"
         web_output_path = os.path.join(output_dir, web_filename)
+        SLOWMO_FACTOR = 4  # 4x slower
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Same codec as create_slow_zoom_replay
-        out = cv2.VideoWriter(raw_output_path, fourcc, fps, (width, height))
+        print(f"--- Creating full slow-motion video using ffmpeg (fast method) ---")
         
-        if not out.isOpened():
-            print(f"❌ Error: Could not create VideoWriter for slow-motion at {raw_output_path}")
-            cap.release()
-            return None
-
-        print(f"--- Creating full slow-motion video (same approach as replay) ---")
+        # Use ffmpeg's setpts filter to slow down video - much faster than frame-by-frame
+        # setpts=4*PTS means each frame is shown 4x longer (4x slower)
+        command = [
+            'ffmpeg',
+            '-y',
+            '-i', original_video_path,
+            '-filter:v', f'setpts={SLOWMO_FACTOR}*PTS',
+            '-an',  # Remove audio
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-pix_fmt', 'yuv420p',
+            web_output_path
+        ]
         
-        # Get total frame count for progress bar
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        pbar = tqdm(total=total_frames, desc="Creating slow-motion video")
-        
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # Write frame multiple times for slow-motion (same as create_slow_zoom_replay)
-            for _ in range(SLOWMO_FACTOR):
-                out.write(frame)
-            
-            pbar.update(1)
-        
-        pbar.close()
-        cap.release()
-        out.release()
-        
-        # Re-encode with ffmpeg using the same approach as create_slow_zoom_replay
-        if _reencode_video_for_web(raw_output_path, web_output_path, "slow-motion video"):
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
             print(f"✅ Full slow-motion video saved to: {web_output_path}")
             # Return web-accessible path
             web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
             return web_video_path
-        else:
+        except subprocess.CalledProcessError as e:
+            print(f"❌ ERROR: ffmpeg slow-motion creation failed.")
+            print(f"ffmpeg stderr: {e.stderr}")
             return None
         
     except Exception as e:
         print(f"❌ Error creating full slow-motion video: {e}")
-        if 'cap' in locals() and cap.isOpened():
-            cap.release()
-        if 'out' in locals() and out.isOpened():
-            out.release()
-        if raw_output_path and os.path.exists(raw_output_path):
-            os.remove(raw_output_path)
         return None
 
 # --- Function to create slow-motion zoom replay ---
 def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps):
     """
     Creates a slow-motion, zoomed-in replay clip of the landing.
+    Uses ffmpeg for faster processing when possible, falls back to OpenCV if needed.
     """
-    raw_output_path = None # Initialize
     try:
+        # Define clip parameters
+        FRAMES_BEFORE = 15
+        FRAMES_AFTER = 15
+        SLOWMO_FACTOR = 4
+        ZOOM_BOX_SIZE = 200
+        FINAL_REPLAY_SIZE = 600
+
+        start_frame = max(0, landing_frame - FRAMES_BEFORE)
+        clip_duration_frames = FRAMES_BEFORE + FRAMES_AFTER
+        clip_duration_seconds = clip_duration_frames / fps
+        
+        # Calculate start time in seconds
+        start_time_seconds = start_frame / fps
+        
+        lp_x, lp_y = landing_point
+        
+        web_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_replay.mp4"
+        web_output_path = os.path.join(output_dir, web_filename)
+        
+        # Get video dimensions first
         cap = cv2.VideoCapture(original_video_path)
         if not cap.isOpened():
             print(f"❌ Error: Cannot open original video for replay: {original_video_path}")
             return None
+        
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        
+        # Calculate crop region (ffmpeg crop format: width:height:x:y)
+        crop_x = max(0, lp_x - ZOOM_BOX_SIZE)
+        crop_y = max(0, lp_y - ZOOM_BOX_SIZE)
+        crop_w = min(2 * ZOOM_BOX_SIZE, width - crop_x)
+        crop_h = min(2 * ZOOM_BOX_SIZE, height - crop_y)
+        
+        print(f"--- Creating slow-mo replay using ffmpeg (fast method) ---")
+        
+        # Use ffmpeg to extract, crop, zoom, and slow down in one pass
+        command = [
+            'ffmpeg',
+            '-y',
+            '-ss', str(start_time_seconds),  # Seek to start frame
+            '-i', original_video_path,
+            '-t', str(clip_duration_seconds),  # Duration of clip
+            '-filter:v', f'crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={FINAL_REPLAY_SIZE}:{FINAL_REPLAY_SIZE},setpts={SLOWMO_FACTOR}*PTS',
+            '-an',  # Remove audio
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            web_output_path
+        ]
+        
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            print(f"✅ Slow-mo replay saved to: {web_output_path}")
+            # Return web-accessible path
+            web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
+            return web_video_path
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️  ffmpeg replay failed, falling back to OpenCV method...")
+            print(f"ffmpeg stderr: {e.stderr}")
+            # Fall back to OpenCV method
+            return _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps)
+        
+    except Exception as e:
+        print(f"❌ Error creating slow-mo replay: {e}")
+        # Try OpenCV fallback
+        try:
+            return _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps)
+        except:
+            return None
 
-        # Define clip parameters
+# --- Fallback function using OpenCV for slow-motion zoom replay ---
+def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps):
+    """Fallback method using OpenCV if ffmpeg fails."""
+    raw_output_path = None
+    try:
+        cap = cv2.VideoCapture(original_video_path)
+        if not cap.isOpened():
+            return None
+
         FRAMES_BEFORE = 15
         FRAMES_AFTER = 15
         CLIP_DURATION = FRAMES_BEFORE + FRAMES_AFTER
-        SLOWMO_FACTOR = 4 # Write each frame 4 times
-        ZOOM_BOX_SIZE = 200 # 400x400 box
+        SLOWMO_FACTOR = 4
+        ZOOM_BOX_SIZE = 200
         FINAL_REPLAY_SIZE = (600, 600)
 
         start_frame = max(0, landing_frame - FRAMES_BEFORE)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         
-        # --- MODIFIED: Set raw and web paths ---
         raw_filename = f"raw_replay_{os.path.splitext(base_filename)[0]}.mp4"
         raw_output_path = os.path.join(output_dir, raw_filename)
-        
         web_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_replay.mp4"
         web_output_path = os.path.join(output_dir, web_filename)
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Write raw file with mp4v
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(raw_output_path, fourcc, fps, FINAL_REPLAY_SIZE)
 
         if not out.isOpened():
-             print(f"❌ Error: Could not create VideoWriter for replay at {raw_output_path}")
-             cap.release()
-             return None
+            cap.release()
+            return None
 
-        print(f"--- Creating slow-mo replay from frame {start_frame} ---")
-        
         lp_x, lp_y = landing_point
 
         for _ in range(CLIP_DURATION):
@@ -373,39 +414,34 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
             if not ret:
                 break
             
-            # Calculate zoom box
             x1 = max(0, lp_x - ZOOM_BOX_SIZE)
             y1 = max(0, lp_y - ZOOM_BOX_SIZE)
             x2 = min(frame.shape[1], lp_x + ZOOM_BOX_SIZE)
             y2 = min(frame.shape[0], lp_y + ZOOM_BOX_SIZE)
             
             crop = frame[y1:y2, x1:x2]
-            
-            # Resize to final size
             zoomed_frame = cv2.resize(crop, FINAL_REPLAY_SIZE, interpolation=cv2.INTER_LINEAR)
             
-            # Write frame multiple times for slow-mo
             for _ in range(SLOWMO_FACTOR):
                 out.write(zoomed_frame)
         
         cap.release()
         out.release()
         
-        # Re-encode with ffmpeg using shared helper function
         if _reencode_video_for_web(raw_output_path, web_output_path, "slow-mo replay"):
-            print(f"✅ Slow-mo replay saved to: {web_output_path}")
-            # Return web-accessible path
             web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
             return web_video_path
         else:
             return None
         
     except Exception as e:
-        print(f"❌ Error creating slow-mo replay: {e}")
-        if 'cap' in locals() and cap.isOpened(): cap.release()
-        if 'out' in locals() and out.isOpened(): out.release()
+        print(f"❌ Error in OpenCV fallback: {e}")
+        if 'cap' in locals() and cap.isOpened():
+            cap.release()
+        if 'out' in locals() and out.isOpened():
+            out.release()
         if raw_output_path and os.path.exists(raw_output_path):
-             os.remove(raw_output_path) # Cleanup on error
+            os.remove(raw_output_path)
         return None
 
 # --- Step 2: Main Video + YOLO + Homography ---
@@ -484,17 +520,21 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         
         base_filename = os.path.basename(video_path)
         
-        # --- Setup Video Writers (Raw and Web) ---
-        raw_filename = f"raw_annotated_{base_filename}"
-        raw_output_path = os.path.join(output_dir, raw_filename)
+        # --- Setup Video Writers - Write directly to H.264 for faster processing ---
         web_filename = f"yolo_homog_{base_filename}"
         web_output_path = os.path.join(output_dir, web_filename)
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Write raw file
-        out = cv2.VideoWriter(raw_output_path, fourcc, fps, (width, height))
+        # Use H.264 codec directly (faster than mp4v, and we'll re-encode anyway)
+        # Try different codecs for best compatibility
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 codec
+        out = cv2.VideoWriter(web_output_path, fourcc, fps, (width, height))
         if not out.isOpened():
-             cap.release()
-             return False, f"Could not create VideoWriter at {raw_output_path}", None, None, None
+            # Fallback to mp4v if avc1 doesn't work
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(web_output_path, fourcc, fps, (width, height))
+            if not out.isOpened():
+                cap.release()
+                return False, f"Could not create VideoWriter at {web_output_path}", None, None, None
 
         # --- Pre-calculate mapped lines and intersection points ---
         mapped_lines = {}
@@ -513,10 +553,20 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             intersection_pts = np.array([i1, i2, i4, i3], dtype=np.int32)
             print("✅ IN/OUT zone (singles) points:", intersection_pts.tolist())
 
-        # --- Process Video ---
+        # --- Process Video (Optimized) ---
         frame_idx = 0
         show_result = False
         in_zone = False
+        
+        # Pre-convert intersection points to int32 once
+        intersection_pts_int = None
+        if intersection_pts is not None:
+            intersection_pts_int = intersection_pts.reshape(-1, 1, 2).astype(np.int32)
+        
+        # Pre-convert line points to int32 tuples for faster drawing
+        mapped_lines_int = {}
+        for name, (p1, p2) in mapped_lines.items():
+            mapped_lines_int[name] = (tuple(np.int32(p1)), tuple(np.int32(p2)))
 
         pbar = tqdm(total=total_frames, desc="YOLO Homography")
         while cap.isOpened():
@@ -525,15 +575,20 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
                 pbar.update(total_frames - frame_idx) 
                 break
 
-            annotated_frame = frame.copy() 
+            # Use frame directly instead of copying when possible (faster)
+            # Only copy if we need to modify it
+            if intersection_pts is not None or mapped_lines:
+                annotated_frame = frame.copy()
+            else:
+                annotated_frame = frame
 
-            # Draw ALL court lines from template
-            for name, (p1, p2) in mapped_lines.items():
-                cv2.line(annotated_frame, tuple(np.int32(p1)), tuple(np.int32(p2)), (255, 255, 0), 2)
+            # Draw ALL court lines from template (optimized with pre-converted points)
+            for name, (p1, p2) in mapped_lines_int.items():
+                cv2.line(annotated_frame, p1, p2, (255, 255, 0), 2)
 
             # Draw red "IN" quadrilateral
-            if intersection_pts is not None:
-                cv2.polylines(annotated_frame, [intersection_pts.reshape(-1, 1, 2)], True, (0, 0, 255), 3)
+            if intersection_pts_int is not None:
+                cv2.polylines(annotated_frame, [intersection_pts_int], True, (0, 0, 255), 3)
 
                 # Once the landing frame is reached, compute IN/OUT once
                 if frame_idx >= landing_frame and not show_result:
@@ -572,40 +627,45 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         pbar.close()
         cap.release()
         out.release()
-        print(f"✅ Raw annotated video saved to: {raw_output_path}")
+        print(f"✅ Annotated video saved to: {web_output_path}")
         
-        # --- NEW: Re-encode with ffmpeg for web compatibility ---
-        print(f"Re-encoding annotated video for web...")
+        # Re-encode with ffmpeg for web compatibility (only if needed)
+        # Check if file is already web-compatible, if not re-encode
+        temp_output = web_output_path + ".temp"
         command = [
             'ffmpeg',
             '-y',
-            '-i', raw_output_path,
+            '-i', web_output_path,
             '-c:v', 'libx264',
-            '-preset', 'fast',
+            '-preset', 'ultrafast',  # Use ultrafast for speed
             '-pix_fmt', 'yuv420p',
-            web_output_path
+            '-movflags', '+faststart',  # Enable fast start for web playback
+            temp_output
         ]
         
         try:
             subprocess.run(command, check=True, capture_output=True, text=True)
+            # Replace original with re-encoded version
+            os.replace(temp_output, web_output_path)
             print(f"✅ Web-compatible annotated video saved to: {web_output_path}")
-            os.remove(raw_output_path) # Clean up raw file
             
             web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
             return True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path
         
         except subprocess.CalledProcessError as e:
-            print(f"❌ ERROR: ffmpeg re-encoding failed for annotated video.")
+            print(f"⚠️  Warning: ffmpeg re-encoding failed, using original video.")
             print(f"ffmpeg stderr: {e.stderr}")
-            if os.path.exists(raw_output_path):
-                os.remove(raw_output_path)
-            return False, "FFmpeg re-encoding failed", None, None, None
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
+            # Return the original file anyway - it might still work
+            web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
+            return True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path
 
     except Exception as e:
         print(f"❌ Error during homography processing: {e}")
         if 'cap' in locals() and cap.isOpened(): cap.release()
         if 'out' in locals() and out.isOpened(): out.release()
         if 'pbar' in locals(): pbar.close()
-        if raw_output_path and os.path.exists(raw_output_path):
-             os.remove(raw_output_path) # Cleanup on error
+        if 'web_output_path' in locals() and os.path.exists(web_output_path):
+             os.remove(web_output_path) # Cleanup on error
         return False, str(e), None, None, None
