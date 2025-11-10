@@ -466,7 +466,8 @@ def check_inference_status_route():
     
     status_copy = inference_status.copy()
 
-    if status_copy["status"] == "complete":
+    # Convert URLs for both complete and error status (error may have slow-motion fallback video)
+    if status_copy["status"] in ["complete", "error"]:
         if status_copy.get("output_url"):
             status_copy["output_url"] = url_for('static', filename=status_copy["output_url"])
         if status_copy.get("output_2d_url"):

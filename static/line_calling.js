@@ -55,12 +55,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayVideo(url) {
+        if (!url) {
+            console.error('displayVideo: No URL provided');
+            return;
+        }
+        console.log('displayVideo: Displaying video at', url);
         mediaOutputDiv.innerHTML = '<h3>Annotated Video</h3>'; 
         const video = document.createElement('video');
         video.src = url + '?t=' + new Date().getTime(); 
         video.controls = true;
         video.autoplay = true;
-        video.muted = true; 
+        video.muted = true;
+        video.preload = 'auto';
+        
+        // Add error handling
+        video.addEventListener('error', (e) => {
+            console.error('Video load error:', e);
+            const errorMsg = document.createElement('p');
+            errorMsg.style.color = 'red';
+            errorMsg.textContent = `Failed to load video. URL: ${url}`;
+            mediaOutputDiv.appendChild(errorMsg);
+        });
+        
+        video.addEventListener('loadeddata', () => {
+            console.log('Video loaded successfully');
+        });
+        
         const downloadLink = createDownloadLink(url, 'Download Video');
         mediaOutputDiv.appendChild(video);
         mediaOutputDiv.appendChild(downloadLink);
@@ -494,7 +514,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // If there's a video URL (slow-motion fallback), display it
                 if (result.output_url) {
+                    console.log('Error case: Displaying slow-motion fallback video:', result.output_url);
                     displayVideo(result.output_url);
+                } else {
+                    console.log('Error case: No output_url provided for slow-motion fallback');
                 }
                 
                 setAllButtonsDisabled(false); 
