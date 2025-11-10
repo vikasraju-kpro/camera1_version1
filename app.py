@@ -69,6 +69,19 @@ def run_inference_task(input_video_path, manual_points=None):
     global inference_status
     try:
         filesystem_path = os.path.join(os.getcwd(), input_video_path.lstrip('/'))
+        # Derive a path relative to the Flask static folder so the frontend can render it if needed
+        static_relative_input_path = None
+        if input_video_path.startswith("/static/"):
+            static_relative_input_path = input_video_path[len("/static/"):]
+        elif input_video_path.startswith("static/"):
+            static_relative_input_path = input_video_path[len("static/"):]
+        else:
+            try:
+                # Best-effort: compute relative path to static directory if possible
+                static_dir = os.path.join(os.getcwd(), "static")
+                static_relative_input_path = os.path.relpath(filesystem_path, static_dir)
+            except Exception:
+                static_relative_input_path = None
         
         if not os.path.exists(filesystem_path):
              raise FileNotFoundError(f"File not found at {filesystem_path}")
@@ -115,14 +128,27 @@ def run_inference_task(input_video_path, manual_points=None):
 
     except Exception as e:
         print(f"❌ Inference thread failed with exception: {e}")
-        inference_status = {
-            "status": "error",
-            "output_url": None,
-            "output_2d_url": None, 
-            "output_2d_zoom_url": None,
-            "output_replay_url": None, 
-            "message": str(e)
-        }
+        # Fallback behavior: if it's a no-hits/no-detections scenario, return the original clip
+        err_lower = str(e).lower()
+        if ("no hits" in err_lower or "no detections" in err_lower) and static_relative_input_path:
+            print("⚠️ No detections found. Falling back to original input clip.")
+            inference_status = {
+                "status": "complete",
+                "output_url": static_relative_input_path,
+                "output_2d_url": None, 
+                "output_2d_zoom_url": None,
+                "output_replay_url": None, 
+                "message": "No detections found. Showing original clip."
+            }
+        else:
+            inference_status = {
+                "status": "error",
+                "output_url": None,
+                "output_2d_url": None, 
+                "output_2d_zoom_url": None,
+                "output_replay_url": None, 
+                "message": str(e)
+            }
 
 
 # --- Page Rendering Routes ---
