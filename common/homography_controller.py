@@ -230,7 +230,7 @@ def generate_2d_illustration_zoom(landing_point_2d, in_zone, output_dir, base_fi
         return None
 
 # --- Helper function to re-encode video for web compatibility ---
-def _reencode_video_for_web(raw_output_path, web_output_path, video_type="video"):
+def _reencode_video_for_web(raw_output_path, web_output_path, video_type="video", preserve_fps=None):
     """Helper function to re-encode raw video with ffmpeg for web compatibility."""
     try:
         print(f"Re-encoding {video_type} for web...")
@@ -242,8 +242,11 @@ def _reencode_video_for_web(raw_output_path, web_output_path, video_type="video"
             '-preset', 'ultrafast',  # Use ultrafast for speed
             '-pix_fmt', 'yuv420p',
             '-movflags', '+faststart',  # Enable fast start for web playback
-            web_output_path
         ]
+        # Preserve frame rate if specified (important for slow motion)
+        if preserve_fps is not None:
+            command.extend(['-r', str(preserve_fps)])
+        command.append(web_output_path)
         subprocess.run(command, check=True, capture_output=True, text=True)
         os.remove(raw_output_path)  # Clean up raw file
         return True
@@ -277,13 +280,15 @@ def create_full_slowmotion_video(original_video_path, output_dir, base_filename)
         original_fps = cap.get(cv2.CAP_PROP_FPS)
         cap.release()
         
-        # For 8x slow motion: setpts slows timestamps by 8x, then fps filter sets output rate
-        output_fps = original_fps / SLOWMO_FACTOR
+        # For 8x slow motion: use setpts to slow timestamps, then set output fps correctly
+        # The key is: setpts slows timestamps, and we output at original fps so it plays 8x slower
         command = [
             'ffmpeg',
             '-y',
             '-i', original_video_path,
-            '-filter:v', f'setpts={SLOWMO_FACTOR}*PTS,fps={output_fps}',
+            '-filter:v', f'setpts={SLOWMO_FACTOR}*PTS',
+            '-vsync', 'cfr',  # Constant frame rate
+            '-r', str(original_fps),  # Output at original fps - setpts makes it play 8x slower
             '-an',  # Remove audio
             '-c:v', 'libx264',
             '-preset', 'fast',
@@ -352,16 +357,16 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         print(f"Landing frame: {landing_frame}, Start frame: {start_frame}, Duration: {clip_duration_frames} frames")
         
         # Use ffmpeg to extract, crop, zoom, and slow down in one pass
-        # For 8x slow motion: setpts slows timestamps by 8x, then fps filter sets output rate
-        # This ensures proper slow motion: 60 frames become 8x longer duration
-        output_fps = fps / SLOWMO_FACTOR
+        # For 8x slow motion: duplicate each frame 8 times using loop filter
+        # This matches the OpenCV approach which works correctly
         command = [
             'ffmpeg',
             '-y',
             '-ss', str(start_time_seconds),  # Seek to start frame
             '-i', original_video_path,
             '-t', str(clip_duration_seconds),  # Duration of original clip (60 frames)
-            '-filter:v', f'crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={FINAL_REPLAY_SIZE}:{FINAL_REPLAY_SIZE},setpts={SLOWMO_FACTOR}*PTS,fps={output_fps}',
+            '-filter:v', f'crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={FINAL_REPLAY_SIZE}:{FINAL_REPLAY_SIZE},loop=loop={SLOWMO_FACTOR}:size=1:start=0,setpts=N/{fps}/TB',
+            '-r', str(fps),  # Output at original fps
             '-an',  # Remove audio
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
@@ -370,25 +375,9 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
             web_output_path
         ]
         
-        try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
-            print(f"✅ Slow-mo replay saved to: {web_output_path}")
-            # Return web-accessible path
-            web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
-            return web_video_path
-        except subprocess.CalledProcessError as e:
-            print(f"⚠️  ffmpeg replay failed, falling back to OpenCV method...")
-            print(f"ffmpeg stderr: {e.stderr}")
-            # Fall back to OpenCV method
-            return _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps)
-        
-    except Exception as e:
-        print(f"❌ Error creating slow-mo replay: {e}")
-        # Try OpenCV fallback
-        try:
-            return _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps)
-        except:
-            return None
+        # Use OpenCV method as primary since it works correctly and reliably
+        # It writes each frame 8 times at original fps, creating proper 8x slow motion
+        return _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps)
 
 # --- Fallback function using OpenCV for slow-motion zoom replay ---
 def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps):
@@ -414,6 +403,8 @@ def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_
         web_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_replay.mp4"
         web_output_path = os.path.join(output_dir, web_filename)
         
+        # Output at original fps - writing each frame 8 times makes it 8x slower
+        # The key is: we write 8 copies of each frame at original fps, so playback is 8x slower
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(raw_output_path, fourcc, fps, FINAL_REPLAY_SIZE)
 
@@ -422,8 +413,11 @@ def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_
             return None
 
         lp_x, lp_y = landing_point
+        
+        print(f"OpenCV slow-mo: Writing {CLIP_DURATION} frames, each duplicated {SLOWMO_FACTOR} times at {fps} fps")
+        print(f"This should create {CLIP_DURATION * SLOWMO_FACTOR} frames total, playing at {fps} fps = {CLIP_DURATION * SLOWMO_FACTOR / fps:.2f} seconds")
 
-        for _ in range(CLIP_DURATION):
+        for frame_idx in range(CLIP_DURATION):
             ret, frame = cap.read()
             if not ret:
                 break
@@ -436,13 +430,15 @@ def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_
             crop = frame[y1:y2, x1:x2]
             zoomed_frame = cv2.resize(crop, FINAL_REPLAY_SIZE, interpolation=cv2.INTER_LINEAR)
             
-            for _ in range(SLOWMO_FACTOR):
+            # Write each frame SLOWMO_FACTOR times to create slow motion
+            for dup_idx in range(SLOWMO_FACTOR):
                 out.write(zoomed_frame)
         
         cap.release()
         out.release()
         
-        if _reencode_video_for_web(raw_output_path, web_output_path, "slow-mo replay"):
+        # Re-encode preserving the original fps (important for slow motion)
+        if _reencode_video_for_web(raw_output_path, web_output_path, "slow-mo replay", preserve_fps=fps):
             web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
             return web_video_path
         else:
