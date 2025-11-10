@@ -112,8 +112,27 @@ def run_inference_task(input_video_path, manual_points=None):
         
         def run_homography():
             try:
-                # Start homography immediately - it will handle waiting for CSV internally
-                # This allows court detection to run in parallel with TFLite inference
+                # Wait for TFLite to complete first to ensure CSV is fully written and closed
+                # This ensures data integrity - CSV must be complete before processing
+                tflite_thread.join()
+                
+                # Small delay to ensure file system has flushed
+                time.sleep(0.3)
+                
+                # Verify CSV exists and is readable
+                if not os.path.exists(tflite_csv_path):
+                    raise FileNotFoundError(f"CSV file not found: {tflite_csv_path}")
+                
+                # Try to read CSV to verify it's complete
+                try:
+                    import pandas as pd
+                    test_df = pd.read_csv(tflite_csv_path)
+                    if len(test_df) == 0:
+                        raise ValueError("CSV file is empty")
+                except Exception as e:
+                    raise ValueError(f"CSV file is not readable or incomplete: {e}")
+                
+                # Now run homography with complete CSV
                 success, vid_path, full_2d, zoom_2d, replay = homography_controller.run_homography_check(
                     filesystem_path,
                     tflite_csv_path,
@@ -132,7 +151,6 @@ def run_inference_task(input_video_path, manual_points=None):
         homog_thread.start()
         
         # Wait for both threads to complete
-        # Note: homography thread will wait for tflite_thread internally, so this is safe
         tflite_thread.join()
         homog_thread.join()
         

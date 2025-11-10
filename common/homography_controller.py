@@ -566,54 +566,23 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         if intersection_pts_int is not None:
             cv2.polylines(base_overlay, [intersection_pts_int], True, (0, 0, 255), 3)
         
-        # --- Now wait for CSV to be ready (for parallelization) ---
-        import time
-        max_wait_time = 300  # 5 minutes max wait
-        wait_start = time.time()
+        # CSV should already be ready (TFLite thread completed before this function is called)
+        # But verify it exists and is readable
+        if not os.path.exists(csv_path):
+            cap.release()
+            return False, f"CSV file not found: {csv_path}", None, None, None
         
-        # Wait for CSV file to exist
-        while not os.path.exists(csv_path):
-            if time.time() - wait_start > max_wait_time:
+        # Verify CSV is readable and has data
+        try:
+            test_df = pd.read_csv(csv_path)
+            if len(test_df) == 0:
                 cap.release()
-                return False, "CSV file not created in time", None, None, None
-            time.sleep(0.1)
+                return False, "CSV file is empty", None, None, None
+        except Exception as e:
+            cap.release()
+            return False, f"CSV file is not readable: {e}", None, None, None
         
-        # Wait for CSV to be stable and complete (check multiple times to ensure it's done)
-        last_size = 0
-        stable_count = 0
-        max_stable_checks = 10  # Need more stability checks to ensure completeness
-        
-        while True:
-            if time.time() - wait_start > max_wait_time:
-                cap.release()
-                return False, "CSV file not ready in time", None, None, None
-            
-            if os.path.exists(csv_path):
-                try:
-                    current_size = os.path.getsize(csv_path)
-                    if current_size > 100:  # Has some content
-                        if current_size == last_size:
-                            stable_count += 1
-                            # Need file to be stable for longer (1 second) to ensure it's complete
-                            if stable_count >= max_stable_checks:
-                                # Try to read CSV to verify it's complete
-                                try:
-                                    test_df = pd.read_csv(csv_path)
-                                    if len(test_df) > 0:
-                                        break  # CSV is readable and has data
-                                except:
-                                    pass  # CSV might still be writing, continue waiting
-                        else:
-                            stable_count = 0
-                        last_size = current_size
-                except OSError:
-                    pass  # File might be locked, continue waiting
-            time.sleep(0.1)
-        
-        # Additional delay to ensure file system has fully flushed
-        time.sleep(0.5)
-        
-        # Get landing point now that CSV is ready
+        # Get landing point from CSV
         landing_point, landing_frame, total_frames = get_landing_point(csv_path)
         if landing_point is None:
             cap.release()
