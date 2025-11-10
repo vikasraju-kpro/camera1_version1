@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const videoUploadInput = document.getElementById('videoUpload');
     const autoRunBtn = document.getElementById('autoRunBtn'); // <-- RENAMED
     const runOnLatestBtn = document.getElementById('runOnLatestBtn');
+    const semiAutoOnLatestBtn = document.getElementById('semiAutoOnLatestBtn');
 
     // --- NEW: Semi-Auto Selectors ---
     const semiAutoUploadBtn = document.getElementById('semiAutoUploadBtn');
@@ -102,6 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
         autoRunBtn.disabled = disabled;
         semiAutoUploadBtn.disabled = disabled;
         runOnLatestBtn.disabled = disabled;
+        if (semiAutoOnLatestBtn) semiAutoOnLatestBtn.disabled = disabled;
     }
     
     function clearMedia() {
@@ -110,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaOutputDiv2DZoom.innerHTML = '';
         mediaOutputReplay.innerHTML = ''; 
         runOnLatestBtn.style.display = 'none';
+        if (semiAutoOnLatestBtn) semiAutoOnLatestBtn.style.display = 'none';
         latestRecordedVideoPath = null;
         // Also hide semi-auto controls
         semiAutoControls.style.display = 'none';
@@ -148,6 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 displayVideo(result.video_url); 
                 latestRecordedVideoPath = result.video_url; 
                 runOnLatestBtn.style.display = 'inline-block'; 
+                if (semiAutoOnLatestBtn) semiAutoOnLatestBtn.style.display = 'inline-block';
             }
         } catch (error) {
             updateStatus('A network error occurred.', true);
@@ -180,11 +184,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     displayVideo(result.video_url);
                     latestRecordedVideoPath = result.video_url;
                     runOnLatestBtn.style.display = 'inline-block';
+                    if (semiAutoOnLatestBtn) semiAutoOnLatestBtn.style.display = 'inline-block';
                 }
             } catch (error) {
                 updateStatus('A network error occurred during upload.', true);
                 setAllButtonsDisabled(false);
             }
+        });
+    }
+
+    // --- NEW: Semi-Auto on Latest Recorded/Uploaded Recording ---
+    if (semiAutoOnLatestBtn) {
+        semiAutoOnLatestBtn.addEventListener('click', async () => {
+            if (!latestRecordedVideoPath) {
+                updateStatus('No recorded video found.', true);
+                return;
+            }
+            updateStatus('Preparing Semi-Auto marking on the recorded video...');
+            setAllButtonsDisabled(true);
+            // Do not clear latestRecordedVideoPath; show marking UI
+            mediaOutputDiv.innerHTML = '';
+            mediaOutputDiv2D.innerHTML = '';
+            mediaOutputDiv2DZoom.innerHTML = '';
+            mediaOutputReplay.innerHTML = '';
+            semiAutoVideoPath = latestRecordedVideoPath;
+            currentFrameNum = 0;
+            manualPoints = [];
+            semiAutoControls.style.display = 'block';
+            runSemiAutoBtn.style.display = 'none';
+            loadFrame(currentFrameNum);
+            updateSemiAutoStatus();
         });
     }
 
