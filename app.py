@@ -128,17 +128,27 @@ def run_inference_task(input_video_path, manual_points=None):
 
     except Exception as e:
         print(f"❌ Inference thread failed with exception: {e}")
-        # Fallback behavior: if it's a no-hits/no-detections scenario, return the original clip
+        # Fallback behavior: for no-hit / no-landing-point style failures, return the original clip
         err_lower = str(e).lower()
-        if ("no hits" in err_lower or "no detections" in err_lower) and static_relative_input_path:
-            print("⚠️ No detections found. Falling back to original input clip.")
+        fallback_phrases = [
+            "no hits", 
+            "no detections", 
+            "homography check failed",
+            "no valid landing point",
+            "no landing point",
+            "cannot determine in/out",
+            "cannot determine in / out"
+        ]
+        should_fallback = any(p in err_lower for p in fallback_phrases)
+        if should_fallback and static_relative_input_path:
+            print("⚠️ No valid result from inference. Falling back to original input clip.")
             inference_status = {
                 "status": "complete",
                 "output_url": static_relative_input_path,
                 "output_2d_url": None, 
                 "output_2d_zoom_url": None,
                 "output_replay_url": None, 
-                "message": "No detections found. Showing original clip."
+                "message": "No valid result from inference. Showing original clip."
             }
         else:
             inference_status = {
