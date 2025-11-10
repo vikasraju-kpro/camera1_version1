@@ -544,14 +544,36 @@ def check_inference_status_route():
 
     # Convert URLs for both complete and error status (error may have slow-motion fallback video)
     if status_copy["status"] in ["complete", "error"]:
+        def normalize_static_url(path):
+            """
+            Ensure paths are correctly mapped to Flask static URLs:
+            - Accepts values like:
+              'line_call_inferences/foo.mp4'
+              'static/line_call_inferences/foo.mp4'
+              '/line_call_inferences/foo.mp4'
+              '/static/line_call_inferences/foo.mp4'
+            - Returns a proper '/static/...' URL.
+            """
+            if not path:
+                return None
+            # If already a full URL, leave it
+            if isinstance(path, str) and (path.startswith("http://") or path.startswith("https://")):
+                return path
+            # Normalize leading slashes
+            normalized = path.lstrip("/") if isinstance(path, str) else path
+            # Strip a leading 'static/' if present, since url_for('static', filename=...) will add it
+            if isinstance(normalized, str) and normalized.startswith("static/"):
+                normalized = normalized[len("static/"):]
+            return url_for("static", filename=normalized)
+
         if status_copy.get("output_url"):
-            status_copy["output_url"] = url_for('static', filename=status_copy["output_url"])
+            status_copy["output_url"] = normalize_static_url(status_copy["output_url"])
         if status_copy.get("output_2d_url"):
-            status_copy["output_2d_url"] = url_for('static', filename=status_copy["output_2d_url"])
+            status_copy["output_2d_url"] = normalize_static_url(status_copy["output_2d_url"])
         if status_copy.get("output_2d_zoom_url"):
-            status_copy["output_2d_zoom_url"] = url_for('static', filename=status_copy["output_2d_zoom_url"])
+            status_copy["output_2d_zoom_url"] = normalize_static_url(status_copy["output_2d_zoom_url"])
         if status_copy.get("output_replay_url"):
-            status_copy["output_replay_url"] = url_for('static', filename=status_copy["output_replay_url"])
+            status_copy["output_replay_url"] = normalize_static_url(status_copy["output_replay_url"])
             
     return jsonify(status_copy)
 
