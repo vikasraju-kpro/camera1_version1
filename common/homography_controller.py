@@ -263,7 +263,7 @@ def create_full_slowmotion_video(original_video_path, output_dir, base_filename)
     try:
         web_filename = f"slowmo_{base_filename}"
         web_output_path = os.path.join(output_dir, web_filename)
-        SLOWMO_FACTOR = 4  # 4x slower
+        SLOWMO_FACTOR = 8  # 8x slower
         
         print(f"--- Creating full slow-motion video using ffmpeg (fast method) ---")
         
@@ -277,8 +277,8 @@ def create_full_slowmotion_video(original_video_path, output_dir, base_filename)
         original_fps = cap.get(cv2.CAP_PROP_FPS)
         cap.release()
         
-        # For 4x slow motion: setpts slows timestamps, fps filter sets output to 1/4 speed
-        output_fps = original_fps / SLOWMO_FACTOR  # Output at 1/4 the original fps for proper slow motion
+        # For 8x slow motion: setpts slows timestamps, fps filter sets output to 1/8 speed
+        output_fps = original_fps / SLOWMO_FACTOR  # Output at 1/8 the original fps for proper slow motion
         command = [
             'ffmpeg',
             '-y',
@@ -314,9 +314,9 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
     """
     try:
         # Define clip parameters
-        FRAMES_BEFORE = 15
-        FRAMES_AFTER = 15
-        SLOWMO_FACTOR = 4
+        FRAMES_BEFORE = 30
+        FRAMES_AFTER = 30
+        SLOWMO_FACTOR = 8
         ZOOM_BOX_SIZE = 200
         FINAL_REPLAY_SIZE = 600
 
@@ -351,8 +351,8 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         print(f"--- Creating slow-mo replay using ffmpeg (fast method) ---")
         
         # Use ffmpeg to extract, crop, zoom, and slow down in one pass
-        # For 4x slow motion: setpts slows timestamps, fps filter sets output to 1/4 speed
-        output_fps = fps / SLOWMO_FACTOR  # Output at 1/4 the original fps for proper slow motion
+        # For 8x slow motion: setpts slows timestamps, fps filter sets output to 1/8 speed
+        output_fps = fps / SLOWMO_FACTOR  # Output at 1/8 the original fps for proper slow motion
         command = [
             'ffmpeg',
             '-y',
@@ -397,10 +397,10 @@ def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_
         if not cap.isOpened():
             return None
 
-        FRAMES_BEFORE = 15
-        FRAMES_AFTER = 15
+        FRAMES_BEFORE = 30
+        FRAMES_AFTER = 30
         CLIP_DURATION = FRAMES_BEFORE + FRAMES_AFTER
-        SLOWMO_FACTOR = 4
+        SLOWMO_FACTOR = 8
         ZOOM_BOX_SIZE = 200
         FINAL_REPLAY_SIZE = (600, 600)
 
