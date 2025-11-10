@@ -201,7 +201,17 @@ def generate_2d_illustration_zoom(landing_point_2d, in_zone, output_dir, base_fi
         x2 = min(img_base.shape[1], lp_padded[0] + ZOOM_BOX_SIZE)
         y2 = min(img_base.shape[0], lp_padded[1] + ZOOM_BOX_SIZE)
         
+        # Validate crop region - ensure it's not empty
+        if x2 <= x1 or y2 <= y1:
+            print(f"⚠️  Warning: Invalid crop region for zoom illustration (landing point outside bounds). Skipping zoom illustration.")
+            return None
+        
         zoom_crop = img_base[y1:y2, x1:x2]
+        
+        # Validate that crop is not empty
+        if zoom_crop.size == 0:
+            print(f"⚠️  Warning: Empty crop region for zoom illustration. Skipping zoom illustration.")
+            return None
 
         # 5. Resize to final output size
         zoom_resized = cv2.resize(zoom_crop, FINAL_ZOOM_SIZE, interpolation=cv2.INTER_LINEAR)
@@ -550,8 +560,14 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             return False, "Could not read landing frame", None, None, None
         
         # Determine IN/OUT
+        if intersection_pts is None:
+            cap.release()
+            return False, "Could not determine IN/OUT zone. Court detection may be incorrect.", None, None, None
+        
         in_zone = point_in_polygon(landing_point, intersection_pts)
         print(f"🏸 Shuttle {'IN' if in_zone else 'OUT'} detected at frame {landing_frame}")
+        print(f"   Landing point (video coords): {landing_point}")
+        print(f"   IN/OUT zone points (video coords): {intersection_pts.tolist()}")
         
         # Generate 2D illustrations and replay (these are fast)
         web_2d_full_path = None
@@ -563,6 +579,10 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             lp_2d_array = cv2.perspectiveTransform(lp_array, H_inv)
             lp_2d = tuple(lp_2d_array[0][0].astype(int))
             print(f"✅ Mapped 2D landing point: {lp_2d}")
+            
+            # Validate 2D coordinates are reasonable (within court bounds with some margin)
+            if lp_2d[0] < -W_2D or lp_2d[0] > W_2D * 2 or lp_2d[1] < -H_2D or lp_2d[1] > H_2D * 2:
+                print(f"⚠️  Warning: Mapped 2D coordinates {lp_2d} seem out of bounds. Homography may be inaccurate.")
             
             web_2d_full_path = generate_2d_illustration_full(
                 lp_2d, in_zone, output_dir, base_filename
