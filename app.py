@@ -91,6 +91,8 @@ def run_inference_task(input_video_path, manual_points=None):
         print(f"Starting TFLite inference thread for: {filesystem_path}")
         
         # --- STAGE 1: Run TFLite Shuttle Tracking ---
+        inference_status["stage"] = 1
+        inference_status["stage_name"] = "Running shuttle tracking"
         inference_status["message"] = "Stage 1/2: Running shuttle tracking..."
         success_tflite, tflite_vid_path, tflite_csv_path = inference_controller.run_inference_on_video(
             filesystem_path, 
@@ -102,8 +104,16 @@ def run_inference_task(input_video_path, manual_points=None):
 
         print(f"--- TFLite step complete. CSV at: {tflite_csv_path} ---")
         print(f"--- Starting YOLO Homography step... ---")
+        # Log elapsed so far
+        try:
+            so_far = time.time() - start_time
+            print(f"⏱️ Stage 1/2 time elapsed so far: {so_far:.2f}s")
+        except Exception:
+            pass
         
         # --- STAGE 2: Run YOLO Homography ---
+        inference_status["stage"] = 2
+        inference_status["stage_name"] = "Running court detection"
         inference_status["message"] = "Stage 2/2: Running court detection..."
         success_homog, final_video_path, final_2d_full_path, final_2d_zoom_path, final_replay_path = homography_controller.run_homography_check(
             filesystem_path,     
@@ -405,7 +415,18 @@ def run_inference_route():
     else:
         print("No manual points, running in Auto-mode.")
 
-    inference_status = {"status": "running", "output_url": None, "output_2d_url": None, "output_2d_zoom_url": None, "output_replay_url": None, "message": "Process starting..."}
+    import time as _time
+    inference_status = {
+        "status": "running",
+        "output_url": None,
+        "output_2d_url": None,
+        "output_2d_zoom_url": None,
+        "output_replay_url": None,
+        "message": "Process starting...",
+        "started_at": _time.time(),
+        "stage": 0,
+        "stage_name": None,
+    }
     # Pass manual_points to the thread
     thread = threading.Thread(target=run_inference_task, args=(input_path, manual_points), daemon=True)
     thread.start()
@@ -418,6 +439,20 @@ def check_inference_status_route():
     global inference_status
     
     status_copy = inference_status.copy()
+
+    # Live update the stage message to include elapsed seconds so far
+    if status_copy.get("status") == "running":
+        try:
+            import time as _time
+            elapsed = None
+            if status_copy.get("started_at"):
+                elapsed = int(_time.time() - status_copy["started_at"])
+            stage = status_copy.get("stage")
+            stage_name = status_copy.get("stage_name")
+            if stage in (1, 2) and stage_name and elapsed is not None:
+                status_copy["message"] = f"Stage {stage}/2: {stage_name}... (elapsed {elapsed}s)"
+        except Exception:
+            pass
 
     if status_copy["status"] == "complete":
         if status_copy.get("output_url"):

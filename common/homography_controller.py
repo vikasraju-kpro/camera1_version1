@@ -11,6 +11,14 @@ MODEL_PATH = "badminton_court_keypoint.pt"
 CONFIDENCE_THRESHOLD = 0.3
 # ----------------------
 
+# --- YOLO model singleton for reuse across runs ---
+_YOLO_MODEL_SINGLETON = None
+def _get_yolo_model():
+    global _YOLO_MODEL_SINGLETON
+    if _YOLO_MODEL_SINGLETON is None:
+        _YOLO_MODEL_SINGLETON = YOLO(MODEL_PATH)
+    return _YOLO_MODEL_SINGLETON
+
 # --- COURT TEMPLATE (GLOBAL) ---
 COURT_TEMPLATE = {
     "baseline_bottom": ((286, 2935), (1379, 2935)),
@@ -303,8 +311,9 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
             '-y',
             '-i', raw_output_path,
             '-c:v', 'libx264',
-            '-preset', 'fast',
+            '-preset', 'veryfast',
             '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
             web_output_path
         ]
         
@@ -369,7 +378,7 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             print("✅ Running automatic YOLO court detection...")
             if not os.path.exists(MODEL_PATH):
                 return False, f"YOLO model not found at {MODEL_PATH}. Please place it in the root directory.", None, None, None
-            model = YOLO(MODEL_PATH)
+            model = _get_yolo_model()
             
             # Find homography from the first few frames
             for _ in range(int(fps * 3)): # Try for 3 seconds
@@ -505,8 +514,9 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             '-y',
             '-i', raw_output_path,
             '-c:v', 'libx264',
-            '-preset', 'fast',
+            '-preset', 'veryfast',
             '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
             web_output_path
         ]
         

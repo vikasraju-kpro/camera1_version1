@@ -75,8 +75,8 @@ def run_inference_on_video(input_video_path, output_dir):
 
     # --- 4. Initialize CSV Output ---
     try:
-        with open(output_csv_path, 'w') as f_csv:
-            f_csv.write('Frame,Visibility,X,Y\n')
+        f_csv = open(output_csv_path, 'w')
+        f_csv.write('Frame,Visibility,X,Y\n')
     except Exception as e:
         error_msg = f"Error: Could not write to CSV file {output_csv_path}: {e}"
         print(f"❌ {error_msg}")
@@ -91,6 +91,7 @@ def run_inference_on_video(input_video_path, output_dir):
     
     video_ended = False
     try:
+        current_input_shape = None
         while True:
             frame_queue = []
             if not video_ended:
@@ -127,8 +128,11 @@ def run_inference_on_video(input_video_path, output_dir):
 
             batch_input = np.array(batch_input, dtype=np.float32) / 255.0
 
-            interpreter.resize_tensor_input(input_details[0]['index'], batch_input.shape)
-            interpreter.allocate_tensors()
+            # Only resize/reallocate if shape changed (typically only on last partial batch)
+            if current_input_shape != tuple(batch_input.shape):
+                interpreter.resize_tensor_input(input_details[0]['index'], batch_input.shape)
+                interpreter.allocate_tensors()
+                current_input_shape = tuple(batch_input.shape)
             interpreter.set_tensor(input_details[0]['index'], batch_input)
             interpreter.invoke()
             y_pred = interpreter.get_tensor(output_details[0]['index'])
@@ -143,16 +147,14 @@ def run_inference_on_video(input_video_path, output_dir):
                     cx_pred, cy_pred = get_object_center(heatmap)
                     cx_pred_orig, cy_pred_orig = int(ratio * cx_pred), int(ratio * cy_pred)
                     vis = 1 if cx_pred > 0 or cy_pred > 0 else 0
-                    with open(output_csv_path, 'a') as f_csv:
-                        f_csv.write(f'{frame_count + frame_idx_in_queue},{vis},{cx_pred_orig},{cy_pred_orig}\n')
+                    f_csv.write(f'{frame_count + frame_idx_in_queue},{vis},{cx_pred_orig},{cy_pred_orig}\n')
                     if vis == 1:
                         cv2.circle(img, (cx_pred_orig, cy_pred_orig), 5, (0, 0, 255), -1)
                     out.write(img)
 
                 last_frame_idx_in_queue = b * image_num_frame + SEQ_LEN # 9th frame
                 img = process_queue[last_frame_idx_in_queue].copy()
-                with open(output_csv_path, 'a') as f_csv:
-                    f_csv.write(f'{frame_count + last_frame_idx_in_queue},0,0,0\n')
+                f_csv.write(f'{frame_count + last_frame_idx_in_queue},0,0,0\n')
                 out.write(img)
 
             frame_count += len(process_queue)
@@ -168,12 +170,20 @@ def run_inference_on_video(input_video_path, output_dir):
         pbar.close()
         cap.release()
         out.release()
+        try:
+            f_csv.close()
+        except Exception:
+            pass
         return False, error_msg, None # <-- MODIFIED
 
     # --- 6. Cleanup ---
     pbar.close()
     cap.release()
     out.release()
+    try:
+        f_csv.close()
+    except Exception:
+        pass
     print(f"\n--- TFLite Inference Complete ---")
     print(f"Total frames processed: {frame_count}")
     print(f"✅ Output video saved to: {output_video_path}")
