@@ -77,20 +77,99 @@ def run_inference_task(input_video_path, manual_points=None):
 
         print(f"Starting TFLite inference thread for: {filesystem_path}")
         
-        # --- STAGE 1: Run TFLite Shuttle Tracking ---
+        # Generate paths upfront
+        base_filename = os.path.basename(filesystem_path)
+        tflite_csv_path = os.path.join(OUTPUT_DIR_INFERENCES, f"inferred_{os.path.splitext(base_filename)[0]}.csv")
+        
+        # --- STAGE 1 & 2: Run TFLite and Homography in parallel ---
         stage1_start = time.time()
-        inference_status["message"] = "Stage 1/2: Running shuttle tracking..."
-        success_tflite, tflite_vid_path, tflite_csv_path = inference_controller.run_inference_on_video(
-            filesystem_path, 
-            OUTPUT_DIR_INFERENCES
-        )
+        stage2_start = time.time()
+        
+        inference_status["message"] = "Stage 1/2: Running shuttle tracking and court detection in parallel..."
+        
+        # Start TFLite inference in a thread
+        tflite_result = [None, None, None]  # [success, video_path, csv_path]
+        tflite_exception = [None]
+        
+        def run_tflite():
+            try:
+                success, vid_path, csv_path = inference_controller.run_inference_on_video(
+                    filesystem_path, 
+                    OUTPUT_DIR_INFERENCES
+                )
+                tflite_result[0] = success
+                tflite_result[1] = vid_path
+                tflite_result[2] = csv_path
+            except Exception as e:
+                tflite_exception[0] = e
+        
+        tflite_thread = threading.Thread(target=run_tflite, daemon=True)
+        tflite_thread.start()
+        
+        # Start homography processing in parallel (it will wait for CSV)
+        homog_result = [None, None, None, None, None]  # [success, video_path, 2d_full, 2d_zoom, replay]
+        homog_exception = [None]
+        
+        def run_homography():
+            try:
+                # Wait for CSV file to be created and complete
+                # Check if file exists and is not being written to (size stable)
+                max_wait_time = 300  # 5 minutes max wait
+                wait_start = time.time()
+                last_size = 0
+                stable_count = 0
+                
+                while True:
+                    if time.time() - wait_start > max_wait_time:
+                        raise TimeoutError("CSV file not created in time")
+                    
+                    if os.path.exists(tflite_csv_path):
+                        current_size = os.path.getsize(tflite_csv_path)
+                        if current_size > 100:  # Has some content
+                            if current_size == last_size:
+                                stable_count += 1
+                                # If size hasn't changed for 5 checks (0.5s), assume it's complete
+                                if stable_count >= 5:
+                                    break
+                            else:
+                                stable_count = 0
+                            last_size = current_size
+                    time.sleep(0.1)  # Check every 100ms
+                
+                success, vid_path, full_2d, zoom_2d, replay = homography_controller.run_homography_check(
+                    filesystem_path,
+                    tflite_csv_path,
+                    OUTPUT_DIR_INFERENCES,
+                    manual_points=manual_points
+                )
+                homog_result[0] = success
+                homog_result[1] = vid_path
+                homog_result[2] = full_2d
+                homog_result[3] = zoom_2d
+                homog_result[4] = replay
+            except Exception as e:
+                homog_exception[0] = e
+        
+        homog_thread = threading.Thread(target=run_homography, daemon=True)
+        homog_thread.start()
+        
+        # Wait for both threads to complete
+        tflite_thread.join()
+        homog_thread.join()
+        
         stage1_time = time.time() - stage1_start
-
+        stage2_time = time.time() - stage2_start
+        
+        # Check TFLite results
+        if tflite_exception[0]:
+            raise tflite_exception[0]
+        
+        success_tflite, tflite_vid_path, tflite_csv_path = tflite_result[0], tflite_result[1], tflite_result[2]
+        
         if not success_tflite:
             # Create slow-motion video as fallback
             slowmo_video_path = None
             try:
-                base_filename = os.path.basename(filesystem_path)
                 slowmo_video_path = homography_controller.create_full_slowmotion_video(
                     filesystem_path,
                     OUTPUT_DIR_INFERENCES,
@@ -121,18 +200,16 @@ def run_inference_task(input_video_path, manual_points=None):
 
         print(f"--- TFLite step complete. CSV at: {tflite_csv_path} ---")
         print(f"--- TFLite runtime: {stage1_time:.2f}s ---")
-        print(f"--- Starting YOLO Homography step... ---")
         
-        # --- STAGE 2: Run YOLO Homography ---
-        stage2_start = time.time()
-        inference_status["message"] = "Stage 2/2: Running court detection..."
-        success_homog, final_video_path, final_2d_full_path, final_2d_zoom_path, final_replay_path = homography_controller.run_homography_check(
-            filesystem_path,     
-            tflite_csv_path,     
-            OUTPUT_DIR_INFERENCES,
-            manual_points=manual_points # <-- Pass manual points
+        # Check homography results
+        if homog_exception[0]:
+            raise homog_exception[0]
+        
+        success_homog, final_video_path, final_2d_full_path, final_2d_zoom_path, final_replay_path = (
+            homog_result[0], homog_result[1], homog_result[2], homog_result[3], homog_result[4]
         )
-        stage2_time = time.time() - stage2_start
+        
+        print(f"--- Homography runtime: {stage2_time:.2f}s ---")
 
         if not success_homog:
             # Create slow-motion video as fallback
