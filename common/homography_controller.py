@@ -523,21 +523,12 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         
         base_filename = os.path.basename(video_path)
         
-        # --- Setup Video Writers - Write directly to H.264 for faster processing ---
+        # --- Setup Video Writers ---
         web_filename = f"yolo_homog_{base_filename}"
         web_output_path = os.path.join(output_dir, web_filename)
         
         # Use mp4v codec (most compatible, especially on Raspberry Pi)
-        # Hardware H.264 encoders may not be available, so use software codec
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(web_output_path, fourcc, fps, (width, height))
-        if not out.isOpened():
-            # Try XVID as fallback
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')
-            out = cv2.VideoWriter(web_output_path, fourcc, fps, (width, height))
-            if not out.isOpened():
-                cap.release()
-                return False, f"Could not create VideoWriter at {web_output_path}", None, None, None
 
         # --- Pre-calculate mapped lines and intersection points ---
         mapped_lines = {}
@@ -571,74 +562,136 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         for name, (p1, p2) in mapped_lines.items():
             mapped_lines_int[name] = (tuple(np.int32(p1)), tuple(np.int32(p2)))
 
-        pbar = tqdm(total=total_frames, desc="YOLO Homography")
+        # OPTIMIZATION: Only process frames from a few seconds before landing to the end
+        # This dramatically reduces processing time
+        SECONDS_BEFORE_LANDING = 2  # Process 2 seconds before landing
+        start_process_frame = max(0, landing_frame - int(fps * SECONDS_BEFORE_LANDING))
+        frames_to_skip = start_process_frame
+        frames_to_process = total_frames - frames_to_skip
+        
+        print(f"--- Optimizing: Processing only {frames_to_process} frames (from frame {start_process_frame} to end) ---")
+        
+        # Skip to start frame
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_process_frame)
+        frame_idx = start_process_frame
+        
+        pbar = tqdm(total=total_frames, desc="YOLO Homography", initial=frames_to_skip)
         
         # Pre-create a base overlay image with court lines (draw once, reuse)
-        # This avoids redrawing lines on every frame
         base_overlay = np.zeros((height, width, 3), dtype=np.uint8)
         for name, (p1, p2) in mapped_lines_int.items():
             cv2.line(base_overlay, p1, p2, (255, 255, 0), 2)
         if intersection_pts_int is not None:
             cv2.polylines(base_overlay, [intersection_pts_int], True, (0, 0, 255), 3)
         
-        # Only draw overlay on frames after landing (before that, just copy frames)
-        draw_overlay_start = landing_frame if landing_frame is not None else total_frames
+        # Create a temporary video for the annotated part
+        temp_annotated_path = os.path.splitext(web_output_path)[0] + "_annotated_part.mp4"
+        temp_out = cv2.VideoWriter(temp_annotated_path, fourcc, fps, (width, height))
+        if not temp_out.isOpened():
+            cap.release()
+            return False, f"Could not create temp VideoWriter", None, None, None
         
+        # First, use ffmpeg to copy the unannotated beginning part (much faster)
+        if frames_to_skip > 0:
+            start_time_seconds = start_process_frame / fps
+            temp_unannotated_path = os.path.splitext(web_output_path)[0] + "_unannotated_part.mp4"
+            copy_cmd = [
+                'ffmpeg', '-y',
+                '-i', video_path,
+                '-t', str(start_time_seconds),
+                '-c:v', 'copy',  # Copy without re-encoding
+                '-an',
+                temp_unannotated_path
+            ]
+            try:
+                subprocess.run(copy_cmd, check=True, capture_output=True, text=True)
+                print(f"✅ Copied {frames_to_skip} unannotated frames using ffmpeg")
+            except:
+                # If ffmpeg copy fails, we'll process all frames
+                print(f"⚠️  ffmpeg copy failed, processing all frames")
+                frames_to_skip = 0
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                frame_idx = 0
+        
+        # Now process only the frames that need annotation
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 pbar.update(total_frames - frame_idx) 
                 break
 
-            # Only annotate frames from landing frame onwards (much faster)
-            if frame_idx >= draw_overlay_start:
-                # Use faster blending - copy frame and add overlay (faster than addWeighted)
-                annotated_frame = frame.copy()
-                # Use bitwise OR for faster overlay (works for binary-like overlays)
-                mask = cv2.cvtColor(base_overlay, cv2.COLOR_BGR2GRAY) > 0
-                annotated_frame[mask] = base_overlay[mask]
+            # All frames from here need annotation
+            annotated_frame = frame.copy()
+            # Use faster overlay blending
+            mask = cv2.cvtColor(base_overlay, cv2.COLOR_BGR2GRAY) > 0
+            annotated_frame[mask] = base_overlay[mask]
+            
+            # Once the landing frame is reached, compute IN/OUT once
+            if frame_idx == landing_frame and not show_result:
+                in_zone = point_in_polygon(landing_point, intersection_pts)
+                show_result = True
+                print(f"🏸 Shuttle {'IN' if in_zone else 'OUT'} detected at frame {frame_idx}")
                 
-                # Once the landing frame is reached, compute IN/OUT once
-                if frame_idx == landing_frame and not show_result:
-                    in_zone = point_in_polygon(landing_point, intersection_pts)
-                    show_result = True
-                    print(f"🏸 Shuttle {'IN' if in_zone else 'OUT'} detected at frame {frame_idx}")
+                if H_inv is not None:
+                    lp_array = np.array([[landing_point]], dtype=np.float32)
+                    lp_2d_array = cv2.perspectiveTransform(lp_array, H_inv)
+                    lp_2d = tuple(lp_2d_array[0][0].astype(int))
+                    print(f"✅ Mapped 2D landing point: {lp_2d}")
                     
-                    if H_inv is not None:
-                        lp_array = np.array([[landing_point]], dtype=np.float32)
-                        lp_2d_array = cv2.perspectiveTransform(lp_array, H_inv)
-                        lp_2d = tuple(lp_2d_array[0][0].astype(int))
-                        print(f"✅ Mapped 2D landing point: {lp_2d}")
-                        
-                        web_2d_full_path = generate_2d_illustration_full(
-                            lp_2d, in_zone, output_dir, base_filename
-                        )
-                        web_2d_zoom_path = generate_2d_illustration_zoom(
-                            lp_2d, in_zone, output_dir, base_filename
-                        )
-                        web_replay_path = create_slow_zoom_replay(
-                            video_path, landing_frame, landing_point, output_dir, base_filename, fps
-                        )
+                    web_2d_full_path = generate_2d_illustration_full(
+                        lp_2d, in_zone, output_dir, base_filename
+                    )
+                    web_2d_zoom_path = generate_2d_illustration_zoom(
+                        lp_2d, in_zone, output_dir, base_filename
+                    )
+                    web_replay_path = create_slow_zoom_replay(
+                        video_path, landing_frame, landing_point, output_dir, base_filename, fps
+                    )
 
-                # Draw text and circle only after landing frame
-                if show_result:
-                    text = "Shuttle IN" if in_zone else "Shuttle OUT"
-                    color = (0, 255, 0) if in_zone else (0, 0, 255)
-                    cv2.putText(annotated_frame, text, (width - 300, 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3, cv2.LINE_AA)
-                    cv2.circle(annotated_frame, landing_point, 12, (255, 0, 0), -1)
-                
-                out.write(annotated_frame)
-            else:
-                # Before landing frame, just write original frame (much faster)
-                out.write(frame)
-
+            # Draw text and circle only after landing frame
+            if show_result and frame_idx >= landing_frame:
+                text = "Shuttle IN" if in_zone else "Shuttle OUT"
+                color = (0, 255, 0) if in_zone else (0, 0, 255)
+                cv2.putText(annotated_frame, text, (width - 300, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3, cv2.LINE_AA)
+                cv2.circle(annotated_frame, landing_point, 12, (255, 0, 0), -1)
+            
+            temp_out.write(annotated_frame)
             frame_idx += 1
             pbar.update(1)
+        
+        temp_out.release()
+        cap.release()
+        
+        # Concatenate the two parts using ffmpeg (much faster than processing all frames)
+        if frames_to_skip > 0 and os.path.exists(temp_unannotated_path):
+            concat_list_path = os.path.splitext(web_output_path)[0] + "_concat.txt"
+            with open(concat_list_path, 'w') as f:
+                f.write(f"file '{os.path.abspath(temp_unannotated_path)}'\n")
+                f.write(f"file '{os.path.abspath(temp_annotated_path)}'\n")
+            
+            concat_cmd = [
+                'ffmpeg', '-y',
+                '-f', 'concat', '-safe', '0',
+                '-i', concat_list_path,
+                '-c', 'copy',  # Copy without re-encoding
+                web_output_path
+            ]
+            try:
+                subprocess.run(concat_cmd, check=True, capture_output=True, text=True)
+                print(f"✅ Concatenated video parts using ffmpeg")
+                # Clean up temp files
+                os.remove(temp_unannotated_path)
+                os.remove(temp_annotated_path)
+                os.remove(concat_list_path)
+            except Exception as e:
+                print(f"⚠️  Concatenation failed: {e}, using annotated part only")
+                os.replace(temp_annotated_path, web_output_path)
+        else:
+            # No skipping, just rename the annotated part
+            os.replace(temp_annotated_path, web_output_path)
 
         pbar.close()
-        cap.release()
-        out.release()
         print(f"✅ Annotated video saved to: {web_output_path}")
         
         # Re-encode with ffmpeg for web compatibility (only if needed)
@@ -677,8 +730,13 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
     except Exception as e:
         print(f"❌ Error during homography processing: {e}")
         if 'cap' in locals() and cap.isOpened(): cap.release()
-        if 'out' in locals() and out.isOpened(): out.release()
+        if 'temp_out' in locals() and temp_out.isOpened(): temp_out.release()
         if 'pbar' in locals(): pbar.close()
+        # Clean up temp files on error
+        if 'temp_annotated_path' in locals() and os.path.exists(temp_annotated_path):
+            os.remove(temp_annotated_path)
+        if 'temp_unannotated_path' in locals() and os.path.exists(temp_unannotated_path):
+            os.remove(temp_unannotated_path)
         if 'web_output_path' in locals() and os.path.exists(web_output_path):
-             os.remove(web_output_path) # Cleanup on error
+             os.remove(web_output_path)
         return False, str(e), None, None, None
