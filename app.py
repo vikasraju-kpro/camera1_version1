@@ -196,6 +196,27 @@ def stop_line_calling_route():
         return jsonify({"success": False, "message": message}), 500
 
 
+# --- NEW: Upload a video and treat it as a recorded line-calling clip ---
+@app.route("/upload_line_call", methods=["POST"])
+def upload_line_call_route():
+    if 'video' not in request.files:
+        return jsonify({"success": False, "message": "No video file provided."}), 400
+    file = request.files['video']
+    if file.filename == '':
+        return jsonify({"success": False, "message": "No selected file."}), 400
+    # Save into line_calls directory with a timestamped filename to avoid collisions
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = os.path.splitext(file.filename)[0]
+    save_name = f"{base_name}_{timestamp}{VIDEO_EXTENSION}" if not file.filename.lower().endswith(VIDEO_EXTENSION) else f"{base_name}_{timestamp}{VIDEO_EXTENSION}"
+    save_path = os.path.join(OUTPUT_DIR_LINE_CALLS, save_name)
+    file.save(save_path)
+    return jsonify({
+        "success": True,
+        "message": "Video uploaded as recording.",
+        "video_url": url_for("static", filename=f"line_calls/{save_name}")
+    })
+
+
 # --- Calibration and Undistortion Routes ---
 @app.route("/capture_for_calibration", methods=["POST"])
 def capture_for_calibration_route():

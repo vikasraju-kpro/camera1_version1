@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusDiv = document.getElementById('status');
     const startRecordBtn = document.getElementById('startLineCallBtn');
     const stopRecordBtn = document.getElementById('stopLineCallBtn');
+    const recordUploadInput = document.getElementById('recordUpload');
+    const uploadAsRecordingBtn = document.getElementById('uploadAsRecordingBtn');
     const mediaOutputDiv = document.getElementById('media-output');
     const mediaOutputDiv2D = document.getElementById('media-output-2d');
     const mediaOutputDiv2DZoom = document.getElementById('media-output-2d-zoom');
@@ -96,6 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function setAllButtonsDisabled(disabled) {
         startRecordBtn.disabled = disabled;
         stopRecordBtn.disabled = disabled;
+        if (uploadAsRecordingBtn) uploadAsRecordingBtn.disabled = disabled;
         autoRunBtn.disabled = disabled;
         semiAutoUploadBtn.disabled = disabled;
         runOnLatestBtn.disabled = disabled;
@@ -151,6 +154,39 @@ document.addEventListener('DOMContentLoaded', () => {
             setAllButtonsDisabled(false);
         }
     });
+
+    // --- NEW: Upload-as-Recording Event Listener ---
+    if (uploadAsRecordingBtn) {
+        uploadAsRecordingBtn.addEventListener('click', async () => {
+            const file = recordUploadInput?.files?.[0];
+            if (!file) {
+                updateStatus('Please select a video file to upload as recording.', true);
+                return;
+            }
+            updateStatus('Uploading video as recording...');
+            setAllButtonsDisabled(true);
+            clearMedia();
+            const formData = new FormData();
+            formData.append('video', file);
+            try {
+                const response = await fetch('/upload_line_call', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                updateStatus(result.message, !result.success);
+                setAllButtonsDisabled(false);
+                if (result.success && result.video_url) {
+                    displayVideo(result.video_url);
+                    latestRecordedVideoPath = result.video_url;
+                    runOnLatestBtn.style.display = 'inline-block';
+                }
+            } catch (error) {
+                updateStatus('A network error occurred during upload.', true);
+                setAllButtonsDisabled(false);
+            }
+        });
+    }
 
 
     // --- Inference Event Listeners & Functions ---
