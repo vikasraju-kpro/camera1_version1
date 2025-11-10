@@ -277,13 +277,13 @@ def create_full_slowmotion_video(original_video_path, output_dir, base_filename)
         original_fps = cap.get(cv2.CAP_PROP_FPS)
         cap.release()
         
-        output_fps = original_fps / SLOWMO_FACTOR  # Output at 1/4 the original FPS for slow motion
+        # For slow motion: setpts slows down timestamps, output at same fps makes it play slower
         command = [
             'ffmpeg',
             '-y',
             '-i', original_video_path,
             '-filter:v', f'setpts={SLOWMO_FACTOR}*PTS',
-            '-r', str(output_fps),  # Set output frame rate to match slow motion
+            '-r', str(original_fps),  # Keep same frame rate - setpts makes it play slower
             '-an',  # Remove audio
             '-c:v', 'libx264',
             '-preset', 'fast',
@@ -351,8 +351,7 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         print(f"--- Creating slow-mo replay using ffmpeg (fast method) ---")
         
         # Use ffmpeg to extract, crop, zoom, and slow down in one pass
-        # setpts slows down the video, and -r sets the output frame rate to match
-        output_fps = fps / SLOWMO_FACTOR  # Output at 1/4 the original FPS for slow motion
+        # For slow motion: setpts slows down timestamps, output at same fps makes it play slower
         command = [
             'ffmpeg',
             '-y',
@@ -360,7 +359,7 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
             '-i', original_video_path,
             '-t', str(clip_duration_seconds),  # Duration of clip
             '-filter:v', f'crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={FINAL_REPLAY_SIZE}:{FINAL_REPLAY_SIZE},setpts={SLOWMO_FACTOR}*PTS',
-            '-r', str(output_fps),  # Set output frame rate to match slow motion
+            '-r', str(fps),  # Keep same frame rate - setpts makes it play slower
             '-an',  # Remove audio
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
@@ -462,6 +461,7 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
     """
     Runs YOLO homography check on a video using a TFLite CSV.
     Can accept optional manual_points to bypass YOLO detection.
+    This function can start processing before CSV is ready (for parallelization).
     """
     web_2d_full_path = None
     web_2d_zoom_path = None
@@ -471,11 +471,6 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
     H_inv = None
     
     try:
-        # Get landing point
-        landing_point, landing_frame, total_frames = get_landing_point(csv_path)
-        if landing_point is None:
-            return False, "No valid landing point found in CSV. Cannot determine IN/OUT.", None, None, None
-
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return False, f"Cannot open video file: {video_path}", None, None, None
@@ -488,6 +483,7 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         fps = cap.get(cv2.CAP_PROP_FPS)
 
         # --- NEW: Handle Homography (Auto vs Semi-Auto) ---
+        # This can be done immediately, doesn't need CSV
         if manual_points:
             print("✅ Using manual homography points.")
             detected_pts = np.array(manual_points, dtype=np.float32)
@@ -536,14 +532,7 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         
         base_filename = os.path.basename(video_path)
         
-        # --- Setup Video Writers ---
-        web_filename = f"yolo_homog_{base_filename}"
-        web_output_path = os.path.join(output_dir, web_filename)
-        
-        # Use mp4v codec (most compatible, especially on Raspberry Pi)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
-        # --- Pre-calculate mapped lines and intersection points ---
+        # --- Pre-calculate mapped lines and intersection points (can do this before CSV is ready) ---
         mapped_lines = {}
         for name, (p1, p2) in COURT_TEMPLATE.items():
             line = np.array([[p1, p2]], dtype=np.float32)
@@ -560,11 +549,6 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             intersection_pts = np.array([i1, i2, i4, i3], dtype=np.int32)
             print("✅ IN/OUT zone (singles) points:", intersection_pts.tolist())
 
-        # --- Process Video (Optimized) ---
-        frame_idx = 0
-        show_result = False
-        in_zone = False
-        
         # Pre-convert intersection points to int32 once
         intersection_pts_int = None
         if intersection_pts is not None:
@@ -575,14 +559,64 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         for name, (p1, p2) in mapped_lines.items():
             mapped_lines_int[name] = (tuple(np.int32(p1)), tuple(np.int32(p2)))
 
-        pbar = tqdm(total=total_frames, desc="YOLO Homography")
-        
         # Pre-create a base overlay image with court lines (draw once, reuse)
         base_overlay = np.zeros((height, width, 3), dtype=np.uint8)
         for name, (p1, p2) in mapped_lines_int.items():
             cv2.line(base_overlay, p1, p2, (255, 255, 0), 2)
         if intersection_pts_int is not None:
             cv2.polylines(base_overlay, [intersection_pts_int], True, (0, 0, 255), 3)
+        
+        # --- Now wait for CSV to be ready (for parallelization) ---
+        import time
+        max_wait_time = 300  # 5 minutes max wait
+        wait_start = time.time()
+        while not os.path.exists(csv_path):
+            if time.time() - wait_start > max_wait_time:
+                cap.release()
+                return False, "CSV file not created in time", None, None, None
+            time.sleep(0.1)
+        
+        # Wait for CSV to be stable (not being written to)
+        last_size = 0
+        stable_count = 0
+        while True:
+            if time.time() - wait_start > max_wait_time:
+                cap.release()
+                return False, "CSV file not ready in time", None, None, None
+            if os.path.exists(csv_path):
+                current_size = os.path.getsize(csv_path)
+                if current_size > 100:  # Has some content
+                    if current_size == last_size:
+                        stable_count += 1
+                        if stable_count >= 5:  # Stable for 0.5s
+                            break
+                    else:
+                        stable_count = 0
+                    last_size = current_size
+            time.sleep(0.1)
+        
+        # Small delay to ensure file system has flushed
+        time.sleep(0.2)
+        
+        # Get landing point now that CSV is ready
+        landing_point, landing_frame, total_frames = get_landing_point(csv_path)
+        if landing_point is None:
+            cap.release()
+            return False, "No valid landing point found in CSV. Cannot determine IN/OUT.", None, None, None
+        
+        # --- Setup Video Writers ---
+        web_filename = f"yolo_homog_{base_filename}"
+        web_output_path = os.path.join(output_dir, web_filename)
+        
+        # Use mp4v codec (most compatible, especially on Raspberry Pi)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        
+        # --- Process Video (Optimized) ---
+        frame_idx = 0
+        show_result = False
+        in_zone = False
+
+        pbar = tqdm(total=total_frames, desc="YOLO Homography")
         
         # Only draw overlay on frames after landing (before that, just copy frames)
         draw_overlay_start = landing_frame if landing_frame is not None else total_frames
