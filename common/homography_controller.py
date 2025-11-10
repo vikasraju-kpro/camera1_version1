@@ -315,69 +315,11 @@ def create_full_slowmotion_video(original_video_path, output_dir, base_filename)
 def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps):
     """
     Creates a slow-motion, zoomed-in replay clip of the landing.
-    Uses ffmpeg for faster processing when possible, falls back to OpenCV if needed.
+    Uses OpenCV method which works correctly and reliably.
     """
-    try:
-        # Define clip parameters
-        FRAMES_BEFORE = 30
-        FRAMES_AFTER = 30
-        SLOWMO_FACTOR = 8
-        ZOOM_BOX_SIZE = 200
-        FINAL_REPLAY_SIZE = 600
-
-        start_frame = max(0, landing_frame - FRAMES_BEFORE)
-        clip_duration_frames = FRAMES_BEFORE + FRAMES_AFTER
-        clip_duration_seconds = clip_duration_frames / fps
-        
-        # Calculate start time in seconds
-        start_time_seconds = start_frame / fps
-        
-        lp_x, lp_y = landing_point
-        
-        web_filename = f"yolo_homog_{os.path.splitext(base_filename)[0]}_replay.mp4"
-        web_output_path = os.path.join(output_dir, web_filename)
-        
-        # Get video dimensions first
-        cap = cv2.VideoCapture(original_video_path)
-        if not cap.isOpened():
-            print(f"❌ Error: Cannot open original video for replay: {original_video_path}")
-            return None
-        
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
-        
-        # Calculate crop region (ffmpeg crop format: width:height:x:y)
-        crop_x = max(0, lp_x - ZOOM_BOX_SIZE)
-        crop_y = max(0, lp_y - ZOOM_BOX_SIZE)
-        crop_w = min(2 * ZOOM_BOX_SIZE, width - crop_x)
-        crop_h = min(2 * ZOOM_BOX_SIZE, height - crop_y)
-        
-        print(f"--- Creating slow-mo replay using ffmpeg (fast method) ---")
-        print(f"Landing frame: {landing_frame}, Start frame: {start_frame}, Duration: {clip_duration_frames} frames")
-        
-        # Use ffmpeg to extract, crop, zoom, and slow down in one pass
-        # For 8x slow motion: duplicate each frame 8 times using loop filter
-        # This matches the OpenCV approach which works correctly
-        command = [
-            'ffmpeg',
-            '-y',
-            '-ss', str(start_time_seconds),  # Seek to start frame
-            '-i', original_video_path,
-            '-t', str(clip_duration_seconds),  # Duration of original clip (60 frames)
-            '-filter:v', f'crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale={FINAL_REPLAY_SIZE}:{FINAL_REPLAY_SIZE},loop=loop={SLOWMO_FACTOR}:size=1:start=0,setpts=N/{fps}/TB',
-            '-r', str(fps),  # Output at original fps
-            '-an',  # Remove audio
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart',
-            web_output_path
-        ]
-        
-        # Use OpenCV method as primary since it works correctly and reliably
-        # It writes each frame 8 times at original fps, creating proper 8x slow motion
-        return _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps)
+    # Use OpenCV method as primary since it works correctly and reliably
+    # It writes each frame 8 times at original fps, creating proper 8x slow motion
+    return _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps)
 
 # --- Fallback function using OpenCV for slow-motion zoom replay ---
 def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps):
@@ -406,7 +348,7 @@ def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_
         # Output at original fps - writing each frame 8 times makes it 8x slower
         # The key is: we write 8 copies of each frame at original fps, so playback is 8x slower
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(raw_output_path, fourcc, fps, FINAL_REPLAY_SIZE)
+        out = cv2.VideoWriter(raw_output_path, fourcc, fps, FINAL_REPLAY_SIZE[0], FINAL_REPLAY_SIZE[1])
 
         if not out.isOpened():
             cap.release()
