@@ -438,7 +438,18 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         if manual_points:
             print("✅ Using manual homography points.")
             detected_pts = np.array(manual_points, dtype=np.float32)
-            H, _ = cv2.findHomography(TEMPLATE_PTS_HOMOGRAPHY, detected_pts)
+            print(f"   Template points: {TEMPLATE_PTS_HOMOGRAPHY.tolist()}")
+            print(f"   Detected points: {detected_pts.tolist()}")
+            H, mask = cv2.findHomography(TEMPLATE_PTS_HOMOGRAPHY, detected_pts)
+            if H is None:
+                cap.release()
+                return False, "Failed to compute homography from manual points. Please check the points.", None, None, None
+            
+            # Validate homography quality by checking if it produces reasonable results
+            test_pt_template = np.array([[[TEMPLATE_PTS_HOMOGRAPHY[0][0], TEMPLATE_PTS_HOMOGRAPHY[0][1]]]], dtype=np.float32)
+            test_pt_mapped = cv2.perspectiveTransform(test_pt_template, H)
+            print(f"   Homography validation: Template point {TEMPLATE_PTS_HOMOGRAPHY[0]} maps to {test_pt_mapped[0][0]}")
+            
             H_inv = np.linalg.inv(H)
         else:
             print("✅ Running automatic YOLO court detection...")
