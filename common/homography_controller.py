@@ -570,33 +570,48 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
         import time
         max_wait_time = 300  # 5 minutes max wait
         wait_start = time.time()
+        
+        # Wait for CSV file to exist
         while not os.path.exists(csv_path):
             if time.time() - wait_start > max_wait_time:
                 cap.release()
                 return False, "CSV file not created in time", None, None, None
             time.sleep(0.1)
         
-        # Wait for CSV to be stable (not being written to)
+        # Wait for CSV to be stable and complete (check multiple times to ensure it's done)
         last_size = 0
         stable_count = 0
+        max_stable_checks = 10  # Need more stability checks to ensure completeness
+        
         while True:
             if time.time() - wait_start > max_wait_time:
                 cap.release()
                 return False, "CSV file not ready in time", None, None, None
+            
             if os.path.exists(csv_path):
-                current_size = os.path.getsize(csv_path)
-                if current_size > 100:  # Has some content
-                    if current_size == last_size:
-                        stable_count += 1
-                        if stable_count >= 5:  # Stable for 0.5s
-                            break
-                    else:
-                        stable_count = 0
-                    last_size = current_size
+                try:
+                    current_size = os.path.getsize(csv_path)
+                    if current_size > 100:  # Has some content
+                        if current_size == last_size:
+                            stable_count += 1
+                            # Need file to be stable for longer (1 second) to ensure it's complete
+                            if stable_count >= max_stable_checks:
+                                # Try to read CSV to verify it's complete
+                                try:
+                                    test_df = pd.read_csv(csv_path)
+                                    if len(test_df) > 0:
+                                        break  # CSV is readable and has data
+                                except:
+                                    pass  # CSV might still be writing, continue waiting
+                        else:
+                            stable_count = 0
+                        last_size = current_size
+                except OSError:
+                    pass  # File might be locked, continue waiting
             time.sleep(0.1)
         
-        # Small delay to ensure file system has flushed
-        time.sleep(0.2)
+        # Additional delay to ensure file system has fully flushed
+        time.sleep(0.5)
         
         # Get landing point now that CSV is ready
         landing_point, landing_frame, total_frames = get_landing_point(csv_path)
@@ -604,118 +619,74 @@ def run_homography_check(video_path, csv_path, output_dir, manual_points=None):
             cap.release()
             return False, "No valid landing point found in CSV. Cannot determine IN/OUT.", None, None, None
         
-        # --- Setup Video Writers ---
-        web_filename = f"yolo_homog_{base_filename}"
-        web_output_path = os.path.join(output_dir, web_filename)
-        
-        # Use mp4v codec (most compatible, especially on Raspberry Pi)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        
-        # --- Process Video (Optimized) ---
+        # --- Determine IN/OUT result ---
+        # Reset to start and seek to landing frame to determine result
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         frame_idx = 0
-        show_result = False
-        in_zone = False
-
-        pbar = tqdm(total=total_frames, desc="YOLO Homography")
-        
-        # Only draw overlay on frames after landing (before that, just copy frames)
-        draw_overlay_start = landing_frame if landing_frame is not None else total_frames
-        
-        # Setup video writer
-        out = cv2.VideoWriter(web_output_path, fourcc, fps, (width, height))
-        if not out.isOpened():
-            cap.release()
-            return False, f"Could not create VideoWriter at {web_output_path}", None, None, None
+        landing_frame_img = None
         
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
-                pbar.update(total_frames - frame_idx) 
                 break
-
-            # Only annotate frames from landing frame onwards (much faster)
-            if frame_idx >= draw_overlay_start:
-                # Use faster blending - copy frame and add overlay
-                annotated_frame = frame.copy()
-                mask = cv2.cvtColor(base_overlay, cv2.COLOR_BGR2GRAY) > 0
-                annotated_frame[mask] = base_overlay[mask]
-                
-                # Once the landing frame is reached, compute IN/OUT once
-                if frame_idx == landing_frame and not show_result:
-                    in_zone = point_in_polygon(landing_point, intersection_pts)
-                    show_result = True
-                    print(f"🏸 Shuttle {'IN' if in_zone else 'OUT'} detected at frame {frame_idx}")
-                    
-                    if H_inv is not None:
-                        lp_array = np.array([[landing_point]], dtype=np.float32)
-                        lp_2d_array = cv2.perspectiveTransform(lp_array, H_inv)
-                        lp_2d = tuple(lp_2d_array[0][0].astype(int))
-                        print(f"✅ Mapped 2D landing point: {lp_2d}")
-                        
-                        web_2d_full_path = generate_2d_illustration_full(
-                            lp_2d, in_zone, output_dir, base_filename
-                        )
-                        web_2d_zoom_path = generate_2d_illustration_zoom(
-                            lp_2d, in_zone, output_dir, base_filename
-                        )
-                        web_replay_path = create_slow_zoom_replay(
-                            video_path, landing_frame, landing_point, output_dir, base_filename, fps
-                        )
-
-                # Draw text and circle only after landing frame
-                if show_result:
-                    text = "Shuttle IN" if in_zone else "Shuttle OUT"
-                    color = (0, 255, 0) if in_zone else (0, 0, 255)
-                    cv2.putText(annotated_frame, text, (width - 300, 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3, cv2.LINE_AA)
-                    cv2.circle(annotated_frame, landing_point, 12, (255, 0, 0), -1)
-                
-                out.write(annotated_frame)
-            else:
-                # Before landing frame, just write original frame (much faster)
-                out.write(frame)
-
+            if frame_idx == landing_frame:
+                landing_frame_img = frame
+                break
             frame_idx += 1
-            pbar.update(1)
         
-        out.release()
         cap.release()
-
-        pbar.close()
-        print(f"✅ Annotated video saved to: {web_output_path}")
         
-        # Re-encode with ffmpeg for web compatibility (only if needed)
-        # Use .mp4 extension for temp file so ffmpeg can detect format
-        temp_output = os.path.splitext(web_output_path)[0] + "_temp.mp4"
-        command = [
-            'ffmpeg',
-            '-y',
-            '-i', web_output_path,
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',  # Use ultrafast for speed
-            '-pix_fmt', 'yuv420p',
-            '-f', 'mp4',  # Explicitly specify format
-            '-movflags', '+faststart',  # Enable fast start for web playback
-            temp_output
-        ]
+        if landing_frame_img is None:
+            return False, "Could not read landing frame", None, None, None
         
-        try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
-            # Replace original with re-encoded version
-            os.replace(temp_output, web_output_path)
-            print(f"✅ Web-compatible annotated video saved to: {web_output_path}")
+        # Determine IN/OUT
+        in_zone = point_in_polygon(landing_point, intersection_pts)
+        print(f"🏸 Shuttle {'IN' if in_zone else 'OUT'} detected at frame {landing_frame}")
+        
+        # Generate 2D illustrations and replay (these are fast)
+        web_2d_full_path = None
+        web_2d_zoom_path = None
+        web_replay_path = None
+        
+        if H_inv is not None:
+            lp_array = np.array([[landing_point]], dtype=np.float32)
+            lp_2d_array = cv2.perspectiveTransform(lp_array, H_inv)
+            lp_2d = tuple(lp_2d_array[0][0].astype(int))
+            print(f"✅ Mapped 2D landing point: {lp_2d}")
             
-            web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
-            return True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path
+            web_2d_full_path = generate_2d_illustration_full(
+                lp_2d, in_zone, output_dir, base_filename
+            )
+            web_2d_zoom_path = generate_2d_illustration_zoom(
+                lp_2d, in_zone, output_dir, base_filename
+            )
+            web_replay_path = create_slow_zoom_replay(
+                video_path, landing_frame, landing_point, output_dir, base_filename, fps
+            )
         
-        except subprocess.CalledProcessError as e:
-            print(f"⚠️  Warning: ffmpeg re-encoding failed, using original video.")
-            print(f"ffmpeg stderr: {e.stderr}")
-            if os.path.exists(temp_output):
-                os.remove(temp_output)
-            # Return the original file anyway - it might still work
+        # Create a simple video output by copying the original video (fast, no annotation)
+        # The TFLite video already has shuttle tracking, so we can use that or just copy original
+        web_filename = f"yolo_homog_{base_filename}"
+        web_output_path = os.path.join(output_dir, web_filename)
+        
+        # Simply copy the original video using ffmpeg (very fast)
+        try:
+            command = [
+                'ffmpeg',
+                '-y',
+                '-i', video_path,
+                '-c', 'copy',  # Stream copy, no re-encoding - very fast
+                '-movflags', '+faststart',
+                web_output_path
+            ]
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            print(f"✅ Video output saved (copy): {web_output_path}")
             web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
-            return True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path
+        except Exception as e:
+            print(f"⚠️  Warning: Could not copy video, will use TFLite output: {e}")
+            web_video_path = None  # app.py will use TFLite video instead
+        
+        return True, web_video_path, web_2d_full_path, web_2d_zoom_path, web_replay_path
 
     except Exception as e:
         print(f"❌ Error during homography processing: {e}")

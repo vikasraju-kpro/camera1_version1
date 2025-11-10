@@ -224,17 +224,19 @@ def run_inference_task(input_video_path, manual_points=None):
             return
         
         total_time = time.time() - start_time
-        print(f"--- Homography step complete. Final video at: {final_video_path} ---")
+        print(f"--- Homography step complete. IN/OUT determined. ---")
         print(f"--- Homography runtime: {stage2_time:.2f}s ---")
         print(f"--- Total inference runtime: {total_time:.2f}s ({total_time/60:.2f} minutes) ---")
 
         # --- STAGE 3: Set final status ---
+        # Use homography video if available, otherwise fall back to TFLite video
         minutes = int(total_time // 60)
         seconds = int(total_time % 60)
         runtime_msg = f"Total runtime: {minutes}m {seconds}s"
+        output_video = final_video_path if final_video_path else tflite_vid_path
         inference_status = {
             "status": "complete",
-            "output_url": final_video_path,       
+            "output_url": output_video,
             "output_2d_url": final_2d_full_path, 
             "output_2d_zoom_url": final_2d_zoom_path,
             "output_replay_url": final_replay_path, 
