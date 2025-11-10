@@ -348,7 +348,8 @@ def _create_slow_zoom_replay_opencv(original_video_path, landing_frame, landing_
         # Output at original fps - writing each frame 8 times makes it 8x slower
         # The key is: we write 8 copies of each frame at original fps, so playback is 8x slower
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(raw_output_path, fourcc, fps, FINAL_REPLAY_SIZE[0], FINAL_REPLAY_SIZE[1])
+        # cv2.VideoWriter expects frame size as a tuple (width, height)
+        out = cv2.VideoWriter(raw_output_path, fourcc, fps, FINAL_REPLAY_SIZE)
 
         if not out.isOpened():
             cap.release()
