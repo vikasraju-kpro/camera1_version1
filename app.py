@@ -87,7 +87,37 @@ def run_inference_task(input_video_path, manual_points=None):
         stage1_time = time.time() - stage1_start
 
         if not success_tflite:
-            raise Exception(f"TFLite inference failed: {tflite_vid_path}")
+            # Create slow-motion video as fallback
+            slowmo_video_path = None
+            try:
+                base_filename = os.path.basename(filesystem_path)
+                slowmo_video_path = homography_controller.create_full_slowmotion_video(
+                    filesystem_path,
+                    OUTPUT_DIR_INFERENCES,
+                    base_filename
+                )
+                if slowmo_video_path:
+                    print(f"✅ Created slow-motion fallback video: {slowmo_video_path}")
+            except Exception as slowmo_error:
+                print(f"❌ Failed to create slow-motion video: {slowmo_error}")
+            
+            total_time = time.time() - start_time
+            minutes = int(total_time // 60)
+            seconds = int(total_time % 60)
+            runtime_msg = f"Failed after {minutes}m {seconds}s"
+            error_message = f"TFLite inference failed: {tflite_vid_path}. {runtime_msg}"
+            if slowmo_video_path:
+                error_message += " Showing slow-motion video instead."
+            
+            inference_status = {
+                "status": "error",
+                "output_url": slowmo_video_path,
+                "output_2d_url": None,
+                "output_2d_zoom_url": None,
+                "output_replay_url": None,
+                "message": error_message
+            }
+            return
 
         print(f"--- TFLite step complete. CSV at: {tflite_csv_path} ---")
         print(f"--- TFLite runtime: {stage1_time:.2f}s ---")
@@ -105,7 +135,37 @@ def run_inference_task(input_video_path, manual_points=None):
         stage2_time = time.time() - stage2_start
 
         if not success_homog:
-            raise Exception(f"Homography check failed: {final_video_path}")
+            # Create slow-motion video as fallback
+            slowmo_video_path = None
+            try:
+                base_filename = os.path.basename(filesystem_path)
+                slowmo_video_path = homography_controller.create_full_slowmotion_video(
+                    filesystem_path,
+                    OUTPUT_DIR_INFERENCES,
+                    base_filename
+                )
+                if slowmo_video_path:
+                    print(f"✅ Created slow-motion fallback video: {slowmo_video_path}")
+            except Exception as slowmo_error:
+                print(f"❌ Failed to create slow-motion video: {slowmo_error}")
+            
+            total_time = time.time() - start_time
+            minutes = int(total_time // 60)
+            seconds = int(total_time % 60)
+            runtime_msg = f"Failed after {minutes}m {seconds}s"
+            error_message = f"Homography check failed: {final_video_path}. {runtime_msg}"
+            if slowmo_video_path:
+                error_message += " Showing slow-motion video instead."
+            
+            inference_status = {
+                "status": "error",
+                "output_url": slowmo_video_path,
+                "output_2d_url": None,
+                "output_2d_zoom_url": None,
+                "output_replay_url": None,
+                "message": error_message
+            }
+            return
         
         total_time = time.time() - start_time
         print(f"--- Homography step complete. Final video at: {final_video_path} ---")
@@ -130,13 +190,52 @@ def run_inference_task(input_video_path, manual_points=None):
         total_time = time.time() - start_time
         print(f"❌ Inference thread failed with exception: {e}")
         print(f"--- Failed after {total_time:.2f}s ---")
+        
+        # Create slow-motion video as fallback (if we have a valid video path)
+        slowmo_video_path = None
+        try:
+            # Check if filesystem_path was defined and file exists
+            if 'filesystem_path' in locals() and os.path.exists(filesystem_path):
+                base_filename = os.path.basename(filesystem_path)
+                slowmo_video_path = homography_controller.create_full_slowmotion_video(
+                    filesystem_path,
+                    OUTPUT_DIR_INFERENCES,
+                    base_filename
+                )
+                if slowmo_video_path:
+                    print(f"✅ Created slow-motion fallback video: {slowmo_video_path}")
+            else:
+                # Try to use input_video_path directly
+                try:
+                    filesystem_path_alt = os.path.join(os.getcwd(), input_video_path.lstrip('/'))
+                    if os.path.exists(filesystem_path_alt):
+                        base_filename = os.path.basename(filesystem_path_alt)
+                        slowmo_video_path = homography_controller.create_full_slowmotion_video(
+                            filesystem_path_alt,
+                            OUTPUT_DIR_INFERENCES,
+                            base_filename
+                        )
+                        if slowmo_video_path:
+                            print(f"✅ Created slow-motion fallback video: {slowmo_video_path}")
+                except:
+                    pass
+        except Exception as slowmo_error:
+            print(f"❌ Failed to create slow-motion video: {slowmo_error}")
+        
+        minutes = int(total_time // 60)
+        seconds = int(total_time % 60)
+        runtime_msg = f"Failed after {minutes}m {seconds}s"
+        error_message = f"{str(e)}. {runtime_msg}"
+        if slowmo_video_path:
+            error_message += " Showing slow-motion video instead."
+        
         inference_status = {
             "status": "error",
-            "output_url": None,
+            "output_url": slowmo_video_path,  # Show slow-motion video on error
             "output_2d_url": None, 
             "output_2d_zoom_url": None,
             "output_replay_url": None, 
-            "message": str(e)
+            "message": error_message
         }
 
 

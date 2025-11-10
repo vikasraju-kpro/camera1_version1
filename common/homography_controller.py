@@ -229,6 +229,103 @@ def generate_2d_illustration_zoom(landing_point_2d, in_zone, output_dir, base_fi
         print(f"❌ Error generating 2D zoom illustration: {e}")
         return None
 
+# --- Helper function to re-encode video for web compatibility ---
+def _reencode_video_for_web(raw_output_path, web_output_path, video_type="video"):
+    """Helper function to re-encode raw video with ffmpeg for web compatibility."""
+    try:
+        print(f"Re-encoding {video_type} for web...")
+        command = [
+            'ffmpeg',
+            '-y',
+            '-i', raw_output_path,
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-pix_fmt', 'yuv420p',
+            web_output_path
+        ]
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        os.remove(raw_output_path)  # Clean up raw file
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ ERROR: ffmpeg re-encoding failed for {video_type}.")
+        print(f"ffmpeg stderr: {e.stderr}")
+        if os.path.exists(raw_output_path):
+            os.remove(raw_output_path)
+        return False
+
+# --- Function to create full slow-motion video (for error cases) ---
+def create_full_slowmotion_video(original_video_path, output_dir, base_filename):
+    """
+    Creates a slow-motion version of the entire video.
+    Used when inference fails to at least show the video in slow-motion.
+    Uses the same slow-motion approach as create_slow_zoom_replay for consistency.
+    """
+    raw_output_path = None
+    try:
+        cap = cv2.VideoCapture(original_video_path)
+        if not cap.isOpened():
+            print(f"❌ Error: Cannot open video for slow-motion: {original_video_path}")
+            return None
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        SLOWMO_FACTOR = 4  # Same factor as create_slow_zoom_replay for consistency
+        
+        # Set output paths
+        raw_filename = f"raw_slowmo_{base_filename}"
+        raw_output_path = os.path.join(output_dir, raw_filename)
+        web_filename = f"slowmo_{base_filename}"
+        web_output_path = os.path.join(output_dir, web_filename)
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Same codec as create_slow_zoom_replay
+        out = cv2.VideoWriter(raw_output_path, fourcc, fps, (width, height))
+        
+        if not out.isOpened():
+            print(f"❌ Error: Could not create VideoWriter for slow-motion at {raw_output_path}")
+            cap.release()
+            return None
+
+        print(f"--- Creating full slow-motion video (same approach as replay) ---")
+        
+        # Get total frame count for progress bar
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        pbar = tqdm(total=total_frames, desc="Creating slow-motion video")
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # Write frame multiple times for slow-motion (same as create_slow_zoom_replay)
+            for _ in range(SLOWMO_FACTOR):
+                out.write(frame)
+            
+            pbar.update(1)
+        
+        pbar.close()
+        cap.release()
+        out.release()
+        
+        # Re-encode with ffmpeg using the same approach as create_slow_zoom_replay
+        if _reencode_video_for_web(raw_output_path, web_output_path, "slow-motion video"):
+            print(f"✅ Full slow-motion video saved to: {web_output_path}")
+            # Return web-accessible path
+            web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
+            return web_video_path
+        else:
+            return None
+        
+    except Exception as e:
+        print(f"❌ Error creating full slow-motion video: {e}")
+        if 'cap' in locals() and cap.isOpened():
+            cap.release()
+        if 'out' in locals() and out.isOpened():
+            out.release()
+        if raw_output_path and os.path.exists(raw_output_path):
+            os.remove(raw_output_path)
+        return None
+
 # --- Function to create slow-motion zoom replay ---
 def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, output_dir, base_filename, fps):
     """
@@ -294,32 +391,13 @@ def create_slow_zoom_replay(original_video_path, landing_frame, landing_point, o
         cap.release()
         out.release()
         
-        # --- NEW: Re-encode with ffmpeg for web compatibility ---
-        print(f"Re-encoding replay video for web...")
-        command = [
-            'ffmpeg',
-            '-y',
-            '-i', raw_output_path,
-            '-c:v', 'libx264',
-            '-preset', 'fast',
-            '-pix_fmt', 'yuv420p',
-            web_output_path
-        ]
-        
-        try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
+        # Re-encode with ffmpeg using shared helper function
+        if _reencode_video_for_web(raw_output_path, web_output_path, "slow-mo replay"):
             print(f"✅ Slow-mo replay saved to: {web_output_path}")
-            os.remove(raw_output_path) # Clean up raw file
-            
             # Return web-accessible path
             web_video_path = os.path.join(os.path.basename(output_dir), web_filename)
             return web_video_path
-        
-        except subprocess.CalledProcessError as e:
-            print(f"❌ ERROR: ffmpeg re-encoding failed for replay.")
-            print(f"ffmpeg stderr: {e.stderr}")
-            if os.path.exists(raw_output_path):
-                os.remove(raw_output_path)
+        else:
             return None
         
     except Exception as e:

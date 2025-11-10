@@ -477,8 +477,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 latestRecordedVideoPath = null;
                 inferenceStartTime = null;
             } else if (result.status === 'error') {
-                clearInterval(statusInterval); 
-                updateStatus(result.message, true);
+                clearInterval(statusInterval);
+                
+                // Calculate total runtime even on error
+                let errorMessage = result.message || 'An error occurred during processing.';
+                if (inferenceStartTime) {
+                    const totalTime = Math.round((Date.now() - inferenceStartTime) / 1000);
+                    const minutes = Math.floor(totalTime / 60);
+                    const seconds = totalTime % 60;
+                    // Only add runtime if not already in message
+                    if (!errorMessage.includes('runtime') && !errorMessage.includes('Failed after')) {
+                        errorMessage += ` (Failed after ${minutes}m ${seconds}s)`;
+                    }
+                }
+                updateStatus(errorMessage, true);
+                
+                // If there's a video URL (slow-motion fallback), display it
+                if (result.output_url) {
+                    displayVideo(result.output_url);
+                }
+                
                 setAllButtonsDisabled(false); 
                 latestRecordedVideoPath = null;
                 inferenceStartTime = null;
