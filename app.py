@@ -112,29 +112,21 @@ def run_inference_task(input_video_path, manual_points=None):
         
         def run_homography():
             try:
-                # Wait for CSV file to be created and complete
-                # Check if file exists and is not being written to (size stable)
-                max_wait_time = 300  # 5 minutes max wait
-                wait_start = time.time()
-                last_size = 0
-                stable_count = 0
+                # Wait for TFLite thread to complete first to ensure CSV is fully written
+                # This ensures data integrity - CSV must be complete before processing
+                tflite_thread.join()
                 
-                while True:
-                    if time.time() - wait_start > max_wait_time:
-                        raise TimeoutError("CSV file not created in time")
-                    
-                    if os.path.exists(tflite_csv_path):
-                        current_size = os.path.getsize(tflite_csv_path)
-                        if current_size > 100:  # Has some content
-                            if current_size == last_size:
-                                stable_count += 1
-                                # If size hasn't changed for 5 checks (0.5s), assume it's complete
-                                if stable_count >= 5:
-                                    break
-                            else:
-                                stable_count = 0
-                            last_size = current_size
-                    time.sleep(0.1)  # Check every 100ms
+                # Verify CSV exists and has content
+                if not os.path.exists(tflite_csv_path):
+                    raise FileNotFoundError(f"CSV file not found: {tflite_csv_path}")
+                
+                # Additional check: ensure CSV has reasonable size (at least header + some data)
+                csv_size = os.path.getsize(tflite_csv_path)
+                if csv_size < 100:
+                    raise ValueError(f"CSV file too small ({csv_size} bytes), may be incomplete")
+                
+                # Small delay to ensure file system has flushed
+                time.sleep(0.2)
                 
                 success, vid_path, full_2d, zoom_2d, replay = homography_controller.run_homography_check(
                     filesystem_path,
@@ -154,6 +146,7 @@ def run_inference_task(input_video_path, manual_points=None):
         homog_thread.start()
         
         # Wait for both threads to complete
+        # Note: homography thread will wait for tflite_thread internally, so this is safe
         tflite_thread.join()
         homog_thread.join()
         
