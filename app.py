@@ -2,6 +2,7 @@ import datetime
 import os
 import glob
 import threading 
+import time
 import cv2 # <-- NEW
 import io # <-- NEW
 from flask import Flask, render_template, jsonify, url_for, request, send_file, send_file
@@ -67,6 +68,7 @@ def run_inference_task(input_video_path, manual_points=None):
     It now accepts optional manual_points.
     """
     global inference_status
+    start_time = time.time()
     try:
         filesystem_path = os.path.join(os.getcwd(), input_video_path.lstrip('/'))
         
@@ -76,19 +78,23 @@ def run_inference_task(input_video_path, manual_points=None):
         print(f"Starting TFLite inference thread for: {filesystem_path}")
         
         # --- STAGE 1: Run TFLite Shuttle Tracking ---
+        stage1_start = time.time()
         inference_status["message"] = "Stage 1/2: Running shuttle tracking..."
         success_tflite, tflite_vid_path, tflite_csv_path = inference_controller.run_inference_on_video(
             filesystem_path, 
             OUTPUT_DIR_INFERENCES
         )
+        stage1_time = time.time() - stage1_start
 
         if not success_tflite:
             raise Exception(f"TFLite inference failed: {tflite_vid_path}")
 
         print(f"--- TFLite step complete. CSV at: {tflite_csv_path} ---")
+        print(f"--- TFLite runtime: {stage1_time:.2f}s ---")
         print(f"--- Starting YOLO Homography step... ---")
         
         # --- STAGE 2: Run YOLO Homography ---
+        stage2_start = time.time()
         inference_status["message"] = "Stage 2/2: Running court detection..."
         success_homog, final_video_path, final_2d_full_path, final_2d_zoom_path, final_replay_path = homography_controller.run_homography_check(
             filesystem_path,     
@@ -96,25 +102,34 @@ def run_inference_task(input_video_path, manual_points=None):
             OUTPUT_DIR_INFERENCES,
             manual_points=manual_points # <-- Pass manual points
         )
+        stage2_time = time.time() - stage2_start
 
         if not success_homog:
             raise Exception(f"Homography check failed: {final_video_path}")
         
+        total_time = time.time() - start_time
         print(f"--- Homography step complete. Final video at: {final_video_path} ---")
+        print(f"--- Homography runtime: {stage2_time:.2f}s ---")
+        print(f"--- Total inference runtime: {total_time:.2f}s ({total_time/60:.2f} minutes) ---")
 
         # --- STAGE 3: Set final status ---
+        minutes = int(total_time // 60)
+        seconds = int(total_time % 60)
+        runtime_msg = f"Total runtime: {minutes}m {seconds}s"
         inference_status = {
             "status": "complete",
             "output_url": final_video_path,       
             "output_2d_url": final_2d_full_path, 
             "output_2d_zoom_url": final_2d_zoom_path,
             "output_replay_url": final_replay_path, 
-            "message": "Line calling process complete."
+            "message": f"Line calling process complete. {runtime_msg}"
         }
         print(f"Inference thread finished: {inference_status['status']}")
 
     except Exception as e:
+        total_time = time.time() - start_time
         print(f"❌ Inference thread failed with exception: {e}")
+        print(f"--- Failed after {total_time:.2f}s ---")
         inference_status = {
             "status": "error",
             "output_url": None,

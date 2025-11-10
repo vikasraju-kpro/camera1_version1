@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusDiv = document.getElementById('status');
     const startRecordBtn = document.getElementById('startLineCallBtn');
     const stopRecordBtn = document.getElementById('stopLineCallBtn');
+    const recordAutoRunBtn = document.getElementById('recordAutoRunBtn');
+    const recordSemiAutoBtn = document.getElementById('recordSemiAutoBtn');
     const mediaOutputDiv = document.getElementById('media-output');
     const mediaOutputDiv2D = document.getElementById('media-output-2d');
     const mediaOutputDiv2DZoom = document.getElementById('media-output-2d-zoom');
@@ -34,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let canvasCtx = frameCanvas.getContext('2d');
     let naturalFrameWidth = 1;
     let naturalFrameHeight = 1;
+    let inferenceStartTime = null; // Track inference start time
 
     // --- Helper Functions ---
     function updateStatus(message, isError = false) {
@@ -96,6 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function setAllButtonsDisabled(disabled) {
         startRecordBtn.disabled = disabled;
         stopRecordBtn.disabled = disabled;
+        recordAutoRunBtn.disabled = disabled;
+        recordSemiAutoBtn.disabled = disabled;
         autoRunBtn.disabled = disabled;
         semiAutoUploadBtn.disabled = disabled;
         runOnLatestBtn.disabled = disabled;
@@ -107,6 +112,8 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaOutputDiv2DZoom.innerHTML = '';
         mediaOutputReplay.innerHTML = ''; 
         runOnLatestBtn.style.display = 'none';
+        recordAutoRunBtn.disabled = true;
+        recordSemiAutoBtn.disabled = true;
         latestRecordedVideoPath = null;
         // Also hide semi-auto controls
         semiAutoControls.style.display = 'none';
@@ -144,7 +151,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.success && result.video_url) {
                 displayVideo(result.video_url); 
                 latestRecordedVideoPath = result.video_url; 
-                runOnLatestBtn.style.display = 'inline-block'; 
+                // Enable the two inference buttons instead of the old single button
+                recordAutoRunBtn.disabled = false;
+                recordSemiAutoBtn.disabled = false;
             }
         } catch (error) {
             updateStatus('A network error occurred.', true);
@@ -154,6 +163,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --- Inference Event Listeners & Functions ---
+
+    // Recording Auto-Run button
+    recordAutoRunBtn.addEventListener('click', () => {
+        if (latestRecordedVideoPath) {
+            startInferenceProcess(latestRecordedVideoPath, null); // null for manual_points
+        } else {
+            updateStatus('No recorded video found.', true);
+        }
+    });
+
+    // Recording Semi-Auto button
+    recordSemiAutoBtn.addEventListener('click', () => {
+        if (!latestRecordedVideoPath) {
+            updateStatus('No recorded video found.', true);
+            return;
+        }
+        
+        semiAutoVideoPath = latestRecordedVideoPath;
+        currentFrameNum = 0;
+        manualPoints = [];
+        semiAutoControls.style.display = 'block';
+        runSemiAutoBtn.style.display = 'none';
+        loadFrame(currentFrameNum);
+        updateSemiAutoStatus();
+    });
 
     runOnLatestBtn.addEventListener('click', () => {
         if (latestRecordedVideoPath) {
@@ -366,6 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- MODIFIED: Main Inference Function ---
     async function startInferenceProcess(videoPath, manual_points = null) {
         let mode = manual_points ? "Semi-Auto" : "Auto";
+        inferenceStartTime = Date.now(); // Track start time
         updateStatus(`Starting ${mode} 2-stage inference... This may take several minutes.`);
         setAllButtonsDisabled(true); 
         clearMedia(); 
@@ -390,10 +425,12 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 updateStatus(result.message, true);
                 setAllButtonsDisabled(false);
+                inferenceStartTime = null;
             }
         } catch (error) {
             updateStatus('A network error occurred.', true);
             setAllButtonsDisabled(false);
+            inferenceStartTime = null;
         }
     }
 
@@ -404,10 +441,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.status === 'running') {
-                updateStatus(result.message || 'Processing... please wait.');
+                let statusMsg = result.message || 'Processing... please wait.';
+                // Add elapsed time if we have a start time
+                if (inferenceStartTime) {
+                    const elapsed = Math.round((Date.now() - inferenceStartTime) / 1000);
+                    statusMsg += ` (Elapsed: ${elapsed}s)`;
+                }
+                updateStatus(statusMsg);
             } else if (result.status === 'complete') {
-                clearInterval(statusInterval); 
-                updateStatus(result.message, false);
+                clearInterval(statusInterval);
+                
+                // Calculate total runtime
+                let finalMessage = result.message || 'Line calling process complete.';
+                if (inferenceStartTime) {
+                    const totalTime = Math.round((Date.now() - inferenceStartTime) / 1000);
+                    const minutes = Math.floor(totalTime / 60);
+                    const seconds = totalTime % 60;
+                    finalMessage += ` Total runtime: ${minutes}m ${seconds}s`;
+                }
+                updateStatus(finalMessage, false);
                 
                 displayVideo(result.output_url); 
                 
@@ -422,17 +474,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 setAllButtonsDisabled(false); 
-                latestRecordedVideoPath = null; 
+                latestRecordedVideoPath = null;
+                inferenceStartTime = null;
             } else if (result.status === 'error') {
                 clearInterval(statusInterval); 
                 updateStatus(result.message, true);
                 setAllButtonsDisabled(false); 
-                latestRecordedVideoPath = null; 
+                latestRecordedVideoPath = null;
+                inferenceStartTime = null;
             }
         } catch (error) {
             clearInterval(statusInterval); 
             updateStatus('Error checking status. Please reload.', true);
             setAllButtonsDisabled(false);
+            inferenceStartTime = null;
         }
     }
 });
