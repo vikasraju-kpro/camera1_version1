@@ -246,8 +246,33 @@ def start_line_calling_route():
 def stop_line_calling_route():
     success, message, video_path = stop_recording()
     if success:
-        video_filename = os.path.basename(video_path)
-        return jsonify({"success": True, "message": message, "video_url": url_for("static", filename=f"line_calls/{video_filename}")})
+        # Try to undistort the recorded video using existing calibration
+        try:
+            undist_success, undist_msg, undist_filename = calibration_controller.undistort_video(
+                video_path, output_dir=OUTPUT_DIR_LINE_CALLS
+            )
+            if undist_success and undist_filename:
+                return jsonify({
+                    "success": True,
+                    "message": f"{message} {undist_msg}",
+                    "video_url": url_for("static", filename=f"line_calls/{undist_filename}")
+                })
+            else:
+                # Fallback to original if undistortion failed or calibration missing
+                video_filename = os.path.basename(video_path)
+                return jsonify({
+                    "success": True,
+                    "message": f"{message} (Undistort skipped: {undist_msg})",
+                    "video_url": url_for("static", filename=f"line_calls/{video_filename}")
+                })
+        except Exception as e:
+            # Robust fallback on unexpected errors
+            video_filename = os.path.basename(video_path)
+            return jsonify({
+                "success": True,
+                "message": f"{message} (Undistort error: {str(e)})",
+                "video_url": url_for("static", filename=f"line_calls/{video_filename}")
+            })
     else:
         return jsonify({"success": False, "message": message}), 500
 
