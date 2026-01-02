@@ -3,9 +3,9 @@ import os
 import glob
 import threading 
 import time
-import cv2 # <-- NEW
-import io # <-- NEW
-from flask import Flask, render_template, jsonify, url_for, request, send_file, send_file
+import cv2 
+import io 
+from flask import Flask, render_template, jsonify, url_for, request, send_file
 
 from common.camera_controller import (
     initialize_camera,
@@ -19,6 +19,7 @@ from common import calibration_controller
 from common import file_manager 
 from common import inference_controller
 from common import homography_controller 
+from common import highlights_controller 
 from common.system_controller import restart_app, restart_system
 from utils.health_check import get_health_report
 from utils.device_info import get_device_uuid, get_device_name
@@ -33,6 +34,7 @@ OUTPUT_DIR_UPLOADS = "static/uploads"
 CALIB_DATA_DIR = "calibration_data"
 OUTPUT_DIR_LINE_CALLS = "static/line_calls"
 OUTPUT_DIR_INFERENCES = "static/line_call_inferences" 
+OUTPUT_DIR_HIGHLIGHTS = "static/highlights_inferences" # <-- NEW FOLDER
 IMAGE_EXTENSION = ".jpg"
 VIDEO_EXTENSION = ".mp4"
 DELETE_PIN = "kpro" 
@@ -56,16 +58,16 @@ os.makedirs(OUTPUT_DIR_UPLOADS, exist_ok=True)
 os.makedirs(CALIB_DATA_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR_LINE_CALLS, exist_ok=True)
 os.makedirs(OUTPUT_DIR_INFERENCES, exist_ok=True)
+os.makedirs(OUTPUT_DIR_HIGHLIGHTS, exist_ok=True) # <-- Create new folder
 initialize_camera()
 # --- End Application Startup ---
 
 
-# --- MODIFIED: Thread target function for running inference ---
+# --- Thread target function for running inference ---
 def run_inference_task(input_video_path, manual_points=None):
     """
-    This function runs in a separate thread.
+    This function runs in a separate thread for the main Line Calling tab.
     It updates the global 'inference_status' variable.
-    It now accepts optional manual_points.
     """
     global inference_status
     start_time = time.time()
@@ -113,7 +115,6 @@ def run_inference_task(input_video_path, manual_points=None):
         def run_homography():
             try:
                 # Wait for TFLite to complete first to ensure CSV is fully written and closed
-                # This ensures data integrity - CSV must be complete before processing
                 tflite_thread.join()
                 
                 # Small delay to ensure file system has flushed
@@ -307,7 +308,7 @@ def run_inference_task(input_video_path, manual_points=None):
         
         inference_status = {
             "status": "error",
-            "output_url": slowmo_video_path,  # Show slow-motion video on error
+            "output_url": slowmo_video_path,
             "output_2d_url": None, 
             "output_2d_zoom_url": None,
             "output_replay_url": None, 
@@ -331,6 +332,10 @@ def file_explorer_page():
 @app.route("/line_calling")
 def line_calling_page():
     return render_template("line_calling.html")
+
+@app.route("/highlights")
+def highlights_page():
+    return render_template("highlights.html")
 
 
 # --- Camera Control Routes ---
@@ -455,7 +460,7 @@ def upload_for_inference_route():
     input_url = url_for('static', filename=f'uploads/{file.filename}')
     return jsonify({"success": True, "message": "File uploaded.", "input_path": input_url})
 
-# --- NEW: Route to get a specific frame from a video ---
+# --- Route to get a specific frame from a video ---
 @app.route("/get_video_frame", methods=["POST"])
 def get_video_frame_route():
     try:
@@ -508,7 +513,8 @@ def get_video_frame_route():
         print(f"❌ Error in /get_video_frame: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-# --- MODIFIED: Route to run inference (now accepts manual points) ---
+
+# --- Route to run inference (now accepts manual points) ---
 @app.route("/run_inference", methods=["POST"])
 def run_inference_route():
     """Starts the inference process in a background thread."""
@@ -545,23 +551,11 @@ def check_inference_status_route():
     # Convert URLs for both complete and error status (error may have slow-motion fallback video)
     if status_copy["status"] in ["complete", "error"]:
         def normalize_static_url(path):
-            """
-            Ensure paths are correctly mapped to Flask static URLs:
-            - Accepts values like:
-              'line_call_inferences/foo.mp4'
-              'static/line_call_inferences/foo.mp4'
-              '/line_call_inferences/foo.mp4'
-              '/static/line_call_inferences/foo.mp4'
-            - Returns a proper '/static/...' URL.
-            """
             if not path:
                 return None
-            # If already a full URL, leave it
             if isinstance(path, str) and (path.startswith("http://") or path.startswith("https://")):
                 return path
-            # Normalize leading slashes
             normalized = path.lstrip("/") if isinstance(path, str) else path
-            # Strip a leading 'static/' if present, since url_for('static', filename=...) will add it
             if isinstance(normalized, str) and normalized.startswith("static/"):
                 normalized = normalized[len("static/"):]
             return url_for("static", filename=normalized)
@@ -576,6 +570,56 @@ def check_inference_status_route():
             status_copy["output_replay_url"] = normalize_static_url(status_copy["output_replay_url"])
             
     return jsonify(status_copy)
+
+
+# --- NEW: Highlights Processing API ---
+@app.route("/api/process_highlights", methods=["POST"])
+def process_highlights_route():
+    if 'video' not in request.files:
+        return jsonify({"success": False, "message": "No video uploaded"}), 400
+    
+    file = request.files['video']
+    if file.filename == '':
+        return jsonify({"success": False, "message": "No selected file"}), 400
+
+    # 1. Save uploaded video
+    filename = file.filename
+    upload_path = os.path.join(OUTPUT_DIR_UPLOADS, filename)
+    file.save(upload_path)
+
+    try:
+        # 2. Run TFLite inference (Ball Tracking) to get CSV data
+        # We pass OUTPUT_DIR_HIGHLIGHTS so all derived files go there
+        success, vid_path, csv_path = inference_controller.run_inference_on_video(
+            upload_path, 
+            OUTPUT_DIR_HIGHLIGHTS 
+        )
+        
+        if not success:
+            return jsonify({"success": False, "message": "Tracking failed: " + vid_path}), 500
+
+        # 3. Generate Highlights using the CSV and Video
+        success, files = highlights_controller.generate_highlights(
+            upload_path, 
+            csv_path, 
+            OUTPUT_DIR_HIGHLIGHTS
+        )
+        
+        if not success:
+             return jsonify({"success": False, "message": "Highlight generation failed."}), 500
+
+        # Convert file paths to URLs for the frontend
+        file_urls = {}
+        for key, path in files.items():
+            filename = os.path.basename(path)
+            # IMPORTANT: We now look in the highlights folder
+            file_urls[key] = url_for('static', filename=f'highlights_inferences/{filename}')
+
+        return jsonify({"success": True, "files": file_urls})
+
+    except Exception as e:
+        print(f"Error in highlights route: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 
 # --- System and Health Routes ---

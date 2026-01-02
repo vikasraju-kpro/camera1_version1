@@ -52,3 +52,7 @@ static/line_call_inferences/
 static/*.mp4
 static/*.mov
 static/*.avi
+
+*.pt
+
+*.mp4
