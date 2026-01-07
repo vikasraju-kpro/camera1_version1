@@ -1,6 +1,6 @@
-import cv2
+ximport cv2
 import numpy as np
-from ai_edge_litert.interpreter import Interpreter
+from tflite_runtime.interpreter import Interpreter
 from tqdm import tqdm
 import os
 from concurrent.futures import ThreadPoolExecutor

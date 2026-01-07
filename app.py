@@ -19,7 +19,8 @@ from common import calibration_controller
 from common import file_manager 
 from common import inference_controller
 from common import homography_controller 
-from common import highlights_controller 
+from common import highlights_controller
+from common import replay_controller
 from common.system_controller import restart_app, restart_system
 from utils.health_check import get_health_report
 from utils.device_info import get_device_uuid, get_device_name
@@ -34,7 +35,7 @@ OUTPUT_DIR_UPLOADS = "static/uploads"
 CALIB_DATA_DIR = "calibration_data"
 OUTPUT_DIR_LINE_CALLS = "static/line_calls"
 OUTPUT_DIR_INFERENCES = "static/line_call_inferences" 
-OUTPUT_DIR_HIGHLIGHTS = "static/highlights_inferences" # <-- NEW FOLDER
+OUTPUT_DIR_HIGHLIGHTS = "static/highlights_inferences"
 IMAGE_EXTENSION = ".jpg"
 VIDEO_EXTENSION = ".mp4"
 DELETE_PIN = "kpro" 
@@ -58,7 +59,7 @@ os.makedirs(OUTPUT_DIR_UPLOADS, exist_ok=True)
 os.makedirs(CALIB_DATA_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR_LINE_CALLS, exist_ok=True)
 os.makedirs(OUTPUT_DIR_INFERENCES, exist_ok=True)
-os.makedirs(OUTPUT_DIR_HIGHLIGHTS, exist_ok=True) # <-- Create new folder
+os.makedirs(OUTPUT_DIR_HIGHLIGHTS, exist_ok=True)
 initialize_camera()
 # --- End Application Startup ---
 
@@ -321,6 +322,10 @@ def run_inference_task(input_video_path, manual_points=None):
 def index():
     return render_template("index.html")
 
+@app.route("/record_match")
+def record_match_page():
+    return render_template("record_match.html")
+
 @app.route("/calibration")
 def calibration_page():
     return render_template("calibration.html")
@@ -367,6 +372,25 @@ def stop_recording_route():
     if success:
         video_filename = os.path.basename(video_path)
         return jsonify({"success": True, "message": message, "video_url": url_for("static", filename=f"recordings/{video_filename}")})
+    else:
+        return jsonify({"success": False, "message": message}), 500
+
+@app.route("/create_instant_replay", methods=["POST"])
+def create_instant_replay_route():
+    # Use the existing 'static/recordings' folder for replays too, or a subfolder
+    REPLAY_DIR = "static/recordings/replays"
+    
+    success, message, replay_path = replay_controller.create_instant_replay(REPLAY_DIR, duration=30)
+    
+    if success:
+        # Convert filesystem path to web URL
+        # Path is likely static/recordings/replays/replay_xxxx.mp4
+        filename = os.path.basename(replay_path)
+        return jsonify({
+            "success": True, 
+            "message": message, 
+            "video_url": url_for('static', filename=f'recordings/replays/{filename}')
+        })
     else:
         return jsonify({"success": False, "message": message}), 500
 
@@ -572,7 +596,7 @@ def check_inference_status_route():
     return jsonify(status_copy)
 
 
-# --- NEW: Highlights Processing API ---
+# --- NEW: Highlights Processing API (Upload) ---
 @app.route("/api/process_highlights", methods=["POST"])
 def process_highlights_route():
     if 'video' not in request.files:
@@ -613,6 +637,57 @@ def process_highlights_route():
         for key, path in files.items():
             filename = os.path.basename(path)
             # IMPORTANT: We now look in the highlights folder
+            file_urls[key] = url_for('static', filename=f'highlights_inferences/{filename}')
+
+        return jsonify({"success": True, "files": file_urls})
+
+    except Exception as e:
+        print(f"Error in highlights route: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+# --- NEW: Process Highlights from Existing File (For Record Match Tab) ---
+@app.route("/api/process_highlights_from_path", methods=["POST"])
+def process_highlights_from_path_route():
+    data = request.get_json()
+    video_url = data.get('video_path') # This will be the web URL like /static/recordings/...
+    
+    if not video_url:
+        return jsonify({"success": False, "message": "No video path provided"}), 400
+
+    # Convert web URL to filesystem path
+    # Remove leading slash and URL prefix to get relative path
+    # e.g. "/static/recordings/video.mp4" -> "static/recordings/video.mp4"
+    rel_path = video_url.lstrip('/')
+    filesystem_path = os.path.join(os.getcwd(), rel_path)
+    
+    if not os.path.exists(filesystem_path):
+        return jsonify({"success": False, "message": f"File not found: {filesystem_path}"}), 404
+
+    try:
+        # 1. Run TFLite inference to get CSV data
+        success, vid_path, csv_path = inference_controller.run_inference_on_video(
+            filesystem_path, 
+            OUTPUT_DIR_HIGHLIGHTS 
+        )
+        
+        if not success:
+            return jsonify({"success": False, "message": "Tracking failed: " + vid_path}), 500
+
+        # 2. Generate Highlights
+        success, files = highlights_controller.generate_highlights(
+            filesystem_path, 
+            csv_path, 
+            OUTPUT_DIR_HIGHLIGHTS
+        )
+        
+        if not success:
+             return jsonify({"success": False, "message": "Highlight generation failed."}), 500
+
+        # 3. Return URLs
+        file_urls = {}
+        for key, path in files.items():
+            filename = os.path.basename(path)
             file_urls[key] = url_for('static', filename=f'highlights_inferences/{filename}')
 
         return jsonify({"success": True, "files": file_urls})

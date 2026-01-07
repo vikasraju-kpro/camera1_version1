@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Record Match & Replay</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
+        .container { max-width: 900px; margin: auto; }
+        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; }
+        .section { margin-bottom: 30px; padding: 20px; border: 1px solid #dee2e6; background-color: #fff; border-radius: 8px; }
+        h1, h2, h3, h4 { color: #343a40; }
+        button, a.nav-link, a.btn-download { padding: 10px 15px; margin: 5px; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; text-decoration: none; display: inline-block; background-color: #fff; color: #343a40; }
+        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
+        
+        /* Button Colors */
+        #startRecordBtn { background-color: #198754; color: white; border-color: #198754; }
+        #stopRecordBtn { background-color: #dc3545; color: white; border-color: #dc3545; }
+        #replayBtn { background-color: #ffc107; color: #000; border-color: #ffc107; font-weight: bold; }
+        #generateHighlightsBtn { background-color: #6610f2; color: white; border-color: #6610f2; width: 100%; margin-top: 10px;}
+        #manualHighlightBtn { background-color: #0d6efd; color: white; border-color: #0d6efd; }
+
+        #status { margin-top: 15px; font-weight: bold; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
+        
+        /* Layouts */
+        .grid-output { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .video-card { background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 5px; display: flex; flex-direction: column; }
+        video { width: 100%; border-radius: 4px; margin-top: 10px; border: 1px solid #ddd; }
+        a.btn-download { background-color: #0d6efd; color: white; border: none; margin-top: 10px; text-align: center; }
+        .full-width { grid-column: span 2; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/" class="nav-link">← Back to Main Control</a>
+            <a href="/line_calling" class="nav-link">Line Calling</a>
+            <a href="/highlights" class="nav-link">Highlights</a>
+        </div>
+
+        <h1>Match Recording & Replay</h1>
+        <div id="status">Ready</div>
+
+        <div class="section">
+            <h2>Match Recording</h2>
+            <div class="controls">
+                <button id="startRecordBtn">Start Match Recording</button>
+                <button id="stopRecordBtn" disabled>Stop Match Recording</button>
+                <hr>
+                <p>Press "Instant Replay" to save the <strong>last 30 seconds</strong> as a separate clip without stopping the match.</p>
+                <button id="replayBtn" disabled>⏪ Instant Replay (30s)</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Test Highlights (Manual Upload)</h2>
+            <p>Upload a video file to manually generate and check highlights.</p>
+            <input type="file" id="manualHighlightUpload" accept="video/mp4,video/x-m4v,video/*">
+            <br><br>
+            <button id="manualHighlightBtn">Upload & Generate Highlights</button>
+        </div>
+
+        <div class="grid-output">
+            <div class="video-card" id="match-output" style="display:none;">
+                <h3>🏁 Full Match</h3>
+                <video id="recordedVideo" controls></video>
+                <a id="downloadLink" class="btn-download" download>Download Match</a>
+                <button id="generateHighlightsBtn">✨ Generate Highlights for this Match</button>
+            </div>
+
+            <div class="video-card" id="replay-output" style="display:none;">
+                <h3>⏪ Latest Replay</h3>
+                <video id="replayVideo" controls autoplay></video>
+                <a id="replayDownloadLink" class="btn-download" download>Download Replay</a>
+            </div>
+        </div>
+
+        <div id="highlights-output" class="grid-output" style="display:none; margin-top: 40px; border-top: 2px solid #dee2e6; padding-top: 20px;">
+            <h2 class="full-width">✨ AI Highlights</h2>
+            <div class="video-card full-width" id="cardHighlights" style="display:none;">
+                <h3>🏆 Match Highlights</h3>
+                <video id="vidHighlights" controls></video>
+                <a id="dlHighlights" class="btn-download" download>Download Highlights</a>
+            </div>
+            <div class="video-card" id="cardLongest" style="display:none;">
+                <h3>Longest Rally</h3>
+                <video id="vidLongest" controls></video>
+                <a id="dlLongest" class="btn-download" download>Download Clip</a>
+            </div>
+            <div class="video-card" id="cardShortest" style="display:none;">
+                <h3>Shortest Rally</h3> 
+                <video id="vidShortest" controls></video>
+                <a id="dlShortest" class="btn-download" download>Download Clip</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='record_match.js') }}"></script>
+</body>
+</html>
