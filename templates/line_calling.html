@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Line Calling</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
+        h1, h2, h3 { color: #343a40; }
+        .container { max-width: 800px; margin: auto; }
+        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; }
+        .controls, .inference-controls { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6;}
+        button, a.download-button, a.nav-link { padding: 10px 15px; margin: 5px; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; text-decoration: none; display: inline-block; background-color: #fff; color: #343a40; }
+        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
+        #status { margin-top: 15px; font-weight: bold; min-height: 1.4em; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
+        .output { margin-top: 20px; padding: 1rem; border: 1px solid #dee2e6; background-color: #fff; border-radius: 5px;}
+        .output img, .output video { display: block; margin-top: 10px; max-width: 100%; height: auto; border-radius: 4px; }
+        a.download-button { margin-top: 10px; background-color: #0d6efd; color: white; border-color: #0d6efd; }
+        /* Style for the run inference button */
+        #runOnLatestBtn { background-color: #198754; color: white; border-color: #198754; display: none; }
+        /* Style for the 2D illustration */
+        #media-output-2d img, #media-output-2d-zoom img { 
+            border: 1px solid #ddd; 
+            max-width: 400px; /* Control size */
+        }
+        /* Style for output sections */
+        .output-section { margin-top: 20px; }
+        
+        /* --- NEW: Styles for Semi-Auto --- */
+        #semi-auto-controls {
+            display: none; /* Hidden by default */
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #0d6efd;
+            background-color: #fff;
+            border-radius: 8px;
+        }
+        #frame-display-container {
+            position: relative;
+            max-width: 100%;
+            cursor: crosshair;
+            background-color: #eee;
+            min-height: 200px; /* Placeholder height */
+        }
+        #frame-display-container img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+        #frame-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #semi-auto-status {
+            font-weight: bold;
+            color: #0d6efd;
+            margin: 10px 0;
+            font-size: 1.1em;
+        }
+        #runSemiAutoBtn {
+            background-color: #198754;
+            color: white;
+            display: none; /* Hidden until 4 points are clicked */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/" class="nav-link">← Back to Main Control</a>
+        </div>
+
+        <h1>Line Calling</h1>
+
+        <div class="controls">
+            <h2>Recording</h2>
+            <p>Record a new video clip.</p>
+            <button id="startLineCallBtn">Start Line Calling</button>
+            <button id="stopLineCallBtn" disabled>Stop Line Calling</button>
+            <hr>
+            <button id="recordAutoRunBtn" disabled>Auto-Run Inference</button>
+            <button id="recordSemiAutoBtn" disabled>Semi-Auto Inference</button>
+        </div>
+
+        <div class="inference-controls">
+            <h2>Test Inference</h2>
+            <p>Upload a video file to run the shuttle tracking inference.</p>
+            <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*">
+            <hr>
+            <button id="autoRunBtn">Upload & Auto-Run Inference</button>
+            <button id="semiAutoUploadBtn">Upload & Semi-Auto Inference</button> </div>
+        
+        <div id="semi-auto-controls">
+            <h2>Semi-Auto Marking</h2>
+            <div id="semi-auto-status">Loading video frame...</div>
+            <div>
+                <button id="prevFrameBtn" disabled>&larr; Prev Frame</button>
+                <button id="nextFrameBtn">Next Frame &rarr;</button>
+                <span style="margin-left: 10px;">Frame: <span id="currentFrameNum">0</span></span>
+            </div>
+            <div id="frame-display-container">
+                <img id="frame-image" alt="Video frame for marking" />
+                <canvas id="frame-canvas"></canvas>
+            </div>
+            <button id="runSemiAutoBtn">Run Semi-Auto Inference</button>
+        </div>
+
+        <div id="status">Ready</div>
+
+        <div class="output">
+            <h2>Latest Output</h2>
+            <button id="runOnLatestBtn">Run Inference on This Video</button>
+            
+            <div id="media-output" class="output-section">
+                </div>
+            
+            <div id="media-output-replay" class="output-section">
+                </div>
+
+            <div id="media-output-2d-zoom" class="output-section">
+                </div>
+
+            <div id="media-output-2d" class="output-section">
+                </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='line_calling.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Highlights</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
+        .container { max-width: 900px; margin: auto; }
+        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; }
+        .controls { margin-bottom: 20px; padding: 20px; border: 1px solid #dee2e6; background-color: #fff; border-radius: 8px; }
+        button, a.nav-link, a.btn-download { padding: 10px 15px; margin: 5px; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; text-decoration: none; display: inline-block; background-color: #fff; color: #343a40; }
+        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
+        #generateBtn { background-color: #0d6efd; color: white; border-color: #0d6efd; }
+        a.btn-download { background-color: #198754; color: white; border: none; font-size: 0.9em; }
+        #status { margin-top: 15px; font-weight: bold; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
+        .grid-output { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .video-card { background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 5px; display: flex; flex-direction: column; }
+        .video-card h3 { margin-top: 0; }
+        video { width: 100%; border-radius: 4px; margin-bottom: 10px; }
+        .full-width { grid-column: span 2; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/" class="nav-link">← Back to Main Control</a>
+        </div>
+
+        <h1>AI Highlights Generation</h1>
+
+        <div id="status">Ready</div>
+
+        <div class="controls">
+            <h2>Select Video</h2>
+            <p>Upload a video to automatically track the shuttle and generate highlight clips.</p>
+            <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*">
+            <br><br>
+            <button id="generateBtn">Generate Highlights</button>
+        </div>
+
+        <div id="outputs" class="grid-output" style="display:none;">
+            <div class="video-card full-width" id="cardHighlights" style="display:none;">
+                <h3>🏆 Match Highlights</h3>
+                <video id="vidHighlights" controls></video>
+                <a id="dlHighlights" class="btn-download" download>Download Highlights</a>
+            </div>
+            <div class="video-card" id="cardLongest" style="display:none;">
+                <h3>Longest Rally</h3>
+                <video id="vidLongest" controls></video>
+                <a id="dlLongest" class="btn-download" download>Download Clip</a>
+            </div>
+            <div class="video-card" id="cardShortest" style="display:none;">
+                <h3>Shortest Rally</h3> <video id="vidShortest" controls></video>
+                <a id="dlShortest" class="btn-download" download>Download Clip</a>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='highlights.js') }}"></script>
+</body>
+</html>

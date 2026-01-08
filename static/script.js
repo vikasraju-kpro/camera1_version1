@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Element Selectors ---
+    // --- Element Selectors for Main Page ---
+    const statusDiv = document.getElementById('status');
     const captureBtn = document.getElementById('captureBtn');
     const startRecordBtn = document.getElementById('startRecordBtn');
     const stopRecordBtn = document.getElementById('stopRecordBtn');
@@ -7,127 +8,116 @@ document.addEventListener('DOMContentLoaded', () => {
     const healthBtn = document.getElementById('healthBtn');
     const restartAppBtn = document.getElementById('restartAppBtn');
     const restartSystemBtn = document.getElementById('restartSystemBtn');
-    const statusDiv = document.getElementById('status');
     const mediaOutputDiv = document.getElementById('media-output');
 
     // --- Helper Functions ---
     function updateStatus(message, isError = false) {
         statusDiv.textContent = message;
         statusDiv.style.color = isError ? '#dc3545' : '#198754';
-    }
-
-    function clearMediaOutput() {
-        mediaOutputDiv.innerHTML = '';
+        statusDiv.style.backgroundColor = isError ? '#f8d7da' : '#d1e7dd';
     }
 
     function displayImage(url) {
-        clearMediaOutput();
+        mediaOutputDiv.innerHTML = ''; // Clear previous output
         const img = document.createElement('img');
-        img.src = url + '?t=' + new Date().getTime();
+        img.src = url + '?t=' + new Date().getTime(); // Bust cache
         img.alt = 'Captured Image';
-
-        const downloadLink = document.createElement('a');
-        downloadLink.href = url;
-        downloadLink.textContent = 'Download Image';
-        downloadLink.className = 'download-button';
-        downloadLink.download = url.substring(url.lastIndexOf('/') + 1);
-
+        
+        const downloadLink = createDownloadLink(url, 'Download Image');
         mediaOutputDiv.appendChild(img);
         mediaOutputDiv.appendChild(downloadLink);
     }
 
     function displayVideo(url) {
-        clearMediaOutput();
+        mediaOutputDiv.innerHTML = ''; // Clear previous output
         const video = document.createElement('video');
-        video.src = url + '?t=' + new Date().getTime();
+        video.src = url;
         video.controls = true;
-        video.muted = true;
         video.autoplay = true;
-        video.playsinline = true;
+        video.muted = true; // Autoplay often requires video to be muted
 
-        const downloadLink = document.createElement('a');
-        downloadLink.href = url;
-        downloadLink.textContent = 'Download Video';
-        downloadLink.className = 'download-button';
-        downloadLink.download = url.substring(url.lastIndexOf('/') + 1);
-
+        const downloadLink = createDownloadLink(url, 'Download Video');
         mediaOutputDiv.appendChild(video);
         mediaOutputDiv.appendChild(downloadLink);
-
-        video.load();
-        video.play().catch(error => {
-            console.warn("Autoplay was prevented by the browser.", error);
-        });
+    }
+    
+    function createDownloadLink(url, text) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.textContent = text;
+        a.className = 'download-button';
+        a.download = url.substring(url.lastIndexOf('/') + 1);
+        return a;
     }
 
-    async function apiPost(endpoint) {
-        try {
-            const response = await fetch(endpoint, { method: 'POST' });
-            return await response.json();
-        } catch (error) {
-            return { success: false, message: 'A network error occurred.' };
-        }
-    }
-
-    // --- Event Listeners ---
-    statusBtn.addEventListener('click', async () => {
-        try {
-            const response = await fetch('/device_status');
-            const data = await response.json();
-            const statusMessage = `${data.name} (ID: ${data.device_id}) | Status: ${data.message}`;
-            updateStatus(statusMessage, false);
-        } catch (error) {
-            updateStatus('Failed to get status.', true);
-        }
-    });
-
+    // --- Event Listeners for Main Page ---
     captureBtn.addEventListener('click', async () => {
         updateStatus('Capturing image...');
-        const result = await apiPost('/capture_image');
-        updateStatus(result.message, !result.success);
-        if (result.success && result.image_url) {
-            displayImage(result.image_url);
+        try {
+            const response = await fetch('/capture_image', { method: 'POST' });
+            const result = await response.json();
+            updateStatus(result.message, !result.success);
+            if (result.success && result.image_url) {
+                displayImage(result.image_url);
+            }
+        } catch (error) {
+            updateStatus('A network error occurred.', true);
         }
     });
 
     startRecordBtn.addEventListener('click', async () => {
         updateStatus('Starting recording...');
-        const result = await apiPost('/start_recording');
-        updateStatus(result.message, !result.success);
-        if (result.success) {
-            startRecordBtn.disabled = true;
-            stopRecordBtn.disabled = false;
-            captureBtn.disabled = true;
+        try {
+            const response = await fetch('/start_recording', { method: 'POST' });
+            const result = await response.json();
+            updateStatus(result.message, !result.success);
+            if (result.success) {
+                startRecordBtn.disabled = true;
+                stopRecordBtn.disabled = false;
+            }
+        } catch (error) {
+            updateStatus('A network error occurred.', true);
         }
     });
 
     stopRecordBtn.addEventListener('click', async () => {
-        updateStatus('Stopping recording...');
-        const result = await apiPost('/stop_recording');
-        updateStatus(result.message, !result.success);
-        if (result.success) {
-            startRecordBtn.disabled = false;
-            stopRecordBtn.disabled = true;
-            captureBtn.disabled = false;
-            if (result.video_url) {
-                displayVideo(result.video_url);
+        updateStatus('Stopping recording and processing video...');
+        try {
+            const response = await fetch('/stop_recording', { method: 'POST' });
+            const result = await response.json();
+            updateStatus(result.message, !result.success);
+            if (result.success) {
+                startRecordBtn.disabled = false;
+                stopRecordBtn.disabled = true;
+                if (result.video_url) {
+                    displayVideo(result.video_url);
+                }
             }
-        } else {
-            startRecordBtn.disabled = false;
-            stopRecordBtn.disabled = true;
-            captureBtn.disabled = false;
+        } catch (error) {
+            updateStatus('A network error occurred.', true);
+        }
+    });
+
+    statusBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch('/device_status');
+            const data = await response.json();
+            const statusMessage = `Device: ${data.name} (ID: ${data.device_id}) - Status: ${data.message}`;
+            updateStatus(statusMessage);
+        } catch (error) {
+            updateStatus('Failed to get device status.', true);
         }
     });
 
     healthBtn.addEventListener('click', async () => {
-        updateStatus('Fetching health report...');
         try {
             const response = await fetch('/health_report');
             const data = await response.json();
+            
             if (data.error) {
                 updateStatus(`Error: ${data.details}`, true);
             } else {
-                // Build the health report string, now including the temperature
+                // Build the health report string
                 let report = `Device ID: ${data.device_id} | CPU: ${data.cpu_usage_percent}% | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
                 // Add temperature if it exists in the response
                 if (data.cpu_temperature_c !== null) {
@@ -136,22 +126,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateStatus(report, false);
             }
         } catch (error) {
-            updateStatus('Failed to fetch health report.', true);
+            updateStatus('Failed to get health report.', true);
         }
     });
 
     restartAppBtn.addEventListener('click', async () => {
         if (confirm('Are you sure you want to restart the application?')) {
             updateStatus('Restarting application...');
-            await apiPost('/restart_app');
+            await fetch('/restart_app', { method: 'POST' });
         }
     });
 
     restartSystemBtn.addEventListener('click', async () => {
-        if (confirm('Are you sure you want to restart the system? This will disconnect you.')) {
-            const result = await apiPost('/restart_system');
-            const statusMessage = `${result.message} (ID: ${result.device_id})`;
-            updateStatus(statusMessage);
+        if (confirm('Are you sure you want to RESTART THE ENTIRE SYSTEM?')) {
+            updateStatus('Restarting system...');
+            await fetch('/restart_system', { method: 'POST' });
         }
     });
 });

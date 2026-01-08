@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Explorer</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
+        .container { max-width: 1000px; margin: auto; }
+        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; }
+        h1, h2 { color: #343a40; }
+        #status { margin-top: 15px; font-weight: bold; min-height: 1.4em; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
+        button { padding: 10px 15px; margin: 5px 0; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; background-color: #fff; }
+        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
+        .file-section { margin-bottom: 40px; }
+        .action-bar { margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; background-color: #fff; }
+        th, td { padding: 12px; border: 1px solid #dee2e6; text-align: left; }
+        th { background-color: #e9ecef; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        .file-icon { font-size: 1.2em; margin-right: 8px; }
+
+        /* --- NEW: Styles for PIN Modal --- */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; text-align: center; }
+        .modal-content h3 { margin-top: 0; }
+        .modal-content input { width: calc(100% - 20px); padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .modal-actions button { margin: 0 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/">← Back to Main Control</a>
+        </div>
+        <h1>File Explorer</h1>
+        <div id="status">Loading files...</div>
+
+        <div class="file-section" id="image-section">
+            <h2>🖼️ Images</h2>
+            <div class="action-bar">
+                <button class="download-selected" disabled>Download Selected</button>
+                <button class="delete-selected" disabled>Delete Selected</button>
+                <button class="download-all">Download All as ZIP</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" class="select-all"></th>
+                        <th>Filename</th>
+                        <th>Size (MB)</th>
+                        <th>Date Modified</th>
+                    </tr>
+                </thead>
+                <tbody class="file-list"></tbody>
+            </table>
+        </div>
+
+        <div class="file-section" id="video-section">
+            <h2>🎬 Videos</h2>
+            <div class="action-bar">
+                <button class="download-selected" disabled>Download Selected</button>
+                <button class="delete-selected" disabled>Delete Selected</button>
+                <button class="download-all">Download All as ZIP</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" class="select-all"></th>
+                        <th>Filename</th>
+                        <th>Size (MB)</th>
+                        <th>Date Modified</th>
+                    </tr>
+                </thead>
+                <tbody class="file-list"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="pinModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Enter PIN to Delete</h3>
+            <p>Please enter the PIN to confirm deletion.</p>
+            <input type="password" id="pinInput" placeholder="PIN">
+            <div class="modal-actions">
+                <button id="pinCancelBtn">Cancel</button>
+                <button id="pinConfirmBtn">Confirm Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='file_explorer.js') }}"></script>
+</body>
+</html>
