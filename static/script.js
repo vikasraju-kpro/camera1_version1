@@ -113,8 +113,18 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/health_report');
             const data = await response.json();
-            const report = `CPU: ${data.cpu_usage_percent}% | Temp: ${data.cpu_temperature_c}°C | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
-            updateStatus(report);
+            
+            if (data.error) {
+                updateStatus(`Error: ${data.details}`, true);
+            } else {
+                // Build the health report string
+                let report = `Device ID: ${data.device_id} | CPU: ${data.cpu_usage_percent}% | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
+                // Add temperature if it exists in the response
+                if (data.cpu_temperature_c !== null) {
+                    report += ` | Temp: ${data.cpu_temperature_c}°C`;
+                }
+                updateStatus(report, false);
+            }
         } catch (error) {
             updateStatus('Failed to get health report.', true);
         }
