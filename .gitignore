@@ -56,3 +56,11 @@ static/*.avi
 *.pt
 
 *.mp4
+# --- Added Updates ---
+# Ignore data files
+*.csv
+*.jpg
+*.png
+
+# Ignore highlights data
+static/highlights_inferences/

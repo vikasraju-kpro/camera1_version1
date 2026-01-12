@@ -17,7 +17,6 @@
         #startRecordBtn { background-color: #198754; color: white; border-color: #198754; }
         #stopRecordBtn { background-color: #dc3545; color: white; border-color: #dc3545; }
         #replayBtn { background-color: #ffc107; color: #000; border-color: #ffc107; font-weight: bold; }
-        #generateHighlightsBtn { background-color: #6610f2; color: white; border-color: #6610f2; width: 100%; margin-top: 10px;}
         #manualHighlightBtn { background-color: #0d6efd; color: white; border-color: #0d6efd; }
 
         #status { margin-top: 15px; font-weight: bold; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
@@ -45,7 +44,7 @@
             <h2>Match Recording</h2>
             <div class="controls">
                 <button id="startRecordBtn">Start Match Recording</button>
-                <button id="stopRecordBtn" disabled>Stop Match Recording</button>
+                <button id="stopRecordBtn" disabled>Stop Match</button>
                 <hr>
                 <p>Press "Instant Replay" to save the <strong>last 30 seconds</strong> as a separate clip without stopping the match.</p>
                 <button id="replayBtn" disabled>⏪ Instant Replay (30s)</button>
@@ -65,7 +64,6 @@
                 <h3>🏁 Full Match</h3>
                 <video id="recordedVideo" controls></video>
                 <a id="downloadLink" class="btn-download" download>Download Match</a>
-                <button id="generateHighlightsBtn">✨ Generate Highlights for this Match</button>
             </div>
 
             <div class="video-card" id="replay-output" style="display:none;">

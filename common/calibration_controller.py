@@ -115,7 +115,7 @@ def run_calibration_process():
 def quick_undistort_video(video_path, output_dir="static/uploads"):
     """
     Performs a fast undistortion directly to an MP4 file without re-encoding.
-    The result is suitable for download but may not play in web browsers.
+    INCLUDES ROTATION: Rotates output 90 degrees clockwise (Portrait).
     """
     if not os.path.exists(CAMERA_MATRIX_FILE) or not os.path.exists(DIST_COEFF_FILE):
         return False, "Calibration data not found. Please run fisheye calibration first.", None
@@ -128,6 +128,9 @@ def quick_undistort_video(video_path, output_dir="static/uploads"):
     width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     DIM = (width, height)
+    
+    # SWAP Dimensions for Portrait Output
+    OUTPUT_DIM = (height, width)
 
     output_filename = "quick_undistorted_" + os.path.basename(video_path)
     output_path = os.path.join(output_dir, output_filename)
@@ -137,7 +140,7 @@ def quick_undistort_video(video_path, output_dir="static/uploads"):
     map1, map2 = cv2.fisheye.initUndistortRectifyMap(K, D, np.eye(3), new_K, DIM, cv2.CV_16SC2)
     
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, DIM)
+    out = cv2.VideoWriter(output_path, fourcc, fps, OUTPUT_DIM)
 
     if not out.isOpened():
         return False, "Failed to initialize VideoWriter for quick process.", None
@@ -146,7 +149,9 @@ def quick_undistort_video(video_path, output_dir="static/uploads"):
         ret, frame = cap.read()
         if not ret: break
         undistorted_frame = cv2.remap(frame, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-        out.write(undistorted_frame)
+        # Rotate 90 degrees Clockwise
+        rotated_frame = cv2.rotate(undistorted_frame, cv2.ROTATE_90_CLOCKWISE)
+        out.write(rotated_frame)
     
     cap.release()
     out.release()
@@ -157,6 +162,7 @@ def quick_undistort_video(video_path, output_dir="static/uploads"):
 def undistort_video(video_path, output_dir="static/uploads"):
     """
     Undistorts a video file and re-encodes it for web compatibility.
+    INCLUDES ROTATION: Rotates output 90 degrees clockwise (Portrait).
     """
     if not os.path.exists(CAMERA_MATRIX_FILE) or not os.path.exists(DIST_COEFF_FILE):
         return False, "Calibration data not found. Please run fisheye calibration first.", None
@@ -170,6 +176,9 @@ def undistort_video(video_path, output_dir="static/uploads"):
     fps = cap.get(cv2.CAP_PROP_FPS)
     DIM = (width, height)
     
+    # SWAP Dimensions for Portrait Output
+    OUTPUT_DIM = (height, width)
+    
     raw_output_filename = "raw_undistorted_" + os.path.basename(video_path)
     raw_output_path = os.path.join(output_dir, raw_output_filename)
 
@@ -178,7 +187,7 @@ def undistort_video(video_path, output_dir="static/uploads"):
     map1, map2 = cv2.fisheye.initUndistortRectifyMap(K, D, np.eye(3), new_K, DIM, cv2.CV_16SC2)
 
     fourcc_raw = cv2.VideoWriter_fourcc(*'mp4v') 
-    out_raw = cv2.VideoWriter(raw_output_path, fourcc_raw, fps, DIM)
+    out_raw = cv2.VideoWriter(raw_output_path, fourcc_raw, fps, OUTPUT_DIM)
 
     if not out_raw.isOpened():
         print("❌ ERROR: Could not initialize the intermediate VideoWriter. Check OpenCV/ffmpeg installation.")
@@ -190,7 +199,9 @@ def undistort_video(video_path, output_dir="static/uploads"):
         if not ret:
             break
         undistorted_frame = cv2.remap(frame, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-        out_raw.write(undistorted_frame)
+        # Rotate 90 degrees Clockwise
+        rotated_frame = cv2.rotate(undistorted_frame, cv2.ROTATE_90_CLOCKWISE)
+        out_raw.write(rotated_frame)
     
     cap.release()
     out_raw.release()
@@ -224,3 +235,45 @@ def undistort_video(video_path, output_dir="static/uploads"):
         print(f"ffmpeg stderr: {e.stderr}")
         os.remove(raw_output_path)
         return False, "Video conversion for web playback failed.", None
+
+def undistort_image(image_path):
+    """
+    Undistorts a single image using the saved calibration matrices.
+    INCLUDES ROTATION: Rotates output 90 degrees clockwise (Portrait).
+    Returns (Success, Message, Path to new image).
+    """
+    if not os.path.exists(CAMERA_MATRIX_FILE) or not os.path.exists(DIST_COEFF_FILE):
+        return False, "Calibration data not found.", None
+
+    try:
+        K = np.load(CAMERA_MATRIX_FILE)
+        D = np.load(DIST_COEFF_FILE)
+        
+        img = cv2.imread(image_path)
+        if img is None:
+            return False, "Failed to load image for undistortion.", None
+
+        h, w = img.shape[:2]
+        DIM = (w, h)
+        
+        # Estimate new camera matrix
+        new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(K, D, DIM, np.eye(3), balance=0.0)
+        map1, map2 = cv2.fisheye.initUndistortRectifyMap(K, D, np.eye(3), new_K, DIM, cv2.CV_16SC2)
+        
+        # Remap (undistort)
+        undistorted_img = cv2.remap(img, map1, map2, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        
+        # Rotate 90 degrees Clockwise
+        rotated_img = cv2.rotate(undistorted_img, cv2.ROTATE_90_CLOCKWISE)
+        
+        # Save output with 'undistorted_' prefix in the same directory
+        dir_name, file_name = os.path.split(image_path)
+        output_filename = "undistorted_" + file_name
+        output_path = os.path.join(dir_name, output_filename)
+        
+        cv2.imwrite(output_path, rotated_img)
+        return True, "Image undistorted successfully.", output_path
+
+    except Exception as e:
+        print(f"ERROR in undistort_image: {e}")
+        return False, str(e), None
