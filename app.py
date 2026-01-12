@@ -350,8 +350,17 @@ def capture_image_route():
     filename = f"capture_{timestamp}{IMAGE_EXTENSION}"
     filepath = os.path.join(OUTPUT_DIR_IMAGES, filename)
     success, message = capture_image(filepath)
+    
     if success:
-        return jsonify({"success": True, "message": message, "image_url": url_for("static", filename=f"captures/{filename}")})
+        # Attempt to undistort immediately
+        u_success, u_msg, u_path = calibration_controller.undistort_image(filepath)
+        if u_success:
+            final_filename = os.path.basename(u_path)
+            message += " (Undistorted)"
+            return jsonify({"success": True, "message": message, "image_url": url_for("static", filename=f"captures/{final_filename}")})
+        else:
+            message += f" (Distorted - {u_msg})"
+            return jsonify({"success": True, "message": message, "image_url": url_for("static", filename=f"captures/{filename}")})
     else:
         return jsonify({"success": False, "message": message}), 500
 
@@ -369,9 +378,17 @@ def start_recording_route():
 @app.route("/stop_recording", methods=["POST"])
 def stop_recording_route():
     success, message, video_path = stop_recording()
+    
     if success:
-        video_filename = os.path.basename(video_path)
-        return jsonify({"success": True, "message": message, "video_url": url_for("static", filename=f"recordings/{video_filename}")})
+        # Attempt to undistort immediately
+        u_success, u_msg, u_filename = calibration_controller.undistort_video(video_path, output_dir=OUTPUT_DIR_VIDEOS)
+        if u_success:
+            message += " (Undistorted)"
+            return jsonify({"success": True, "message": message, "video_url": url_for("static", filename=f"recordings/{u_filename}")})
+        else:
+            message += f" (Distorted - {u_msg})"
+            video_filename = os.path.basename(video_path)
+            return jsonify({"success": True, "message": message, "video_url": url_for("static", filename=f"recordings/{video_filename}")})
     else:
         return jsonify({"success": False, "message": message}), 500
 

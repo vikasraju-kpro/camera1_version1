@@ -6,7 +6,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const startBtn = document.getElementById('startRecordBtn');
     const stopBtn = document.getElementById('stopRecordBtn');
     const replayBtn = document.getElementById('replayBtn');
-    const genHighlightsBtn = document.getElementById('generateHighlightsBtn');
     
     const matchOutputDiv = document.getElementById('match-output');
     const recordedVideo = document.getElementById('recordedVideo');
@@ -68,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus('Starting match recording...');
         startBtn.disabled = true;
         stopBtn.disabled = true;
-        genHighlightsBtn.disabled = true;
+        manualHighlightBtn.disabled = true; // Disable manual upload while recording
         
         // Hide previous outputs
         matchOutputDiv.style.display = 'none';
@@ -85,10 +84,12 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 updateStatus('Error: ' + result.message, true);
                 startBtn.disabled = false;
+                manualHighlightBtn.disabled = false;
             }
         } catch (error) {
             updateStatus('Network error starting recording.', true);
             startBtn.disabled = false;
+            manualHighlightBtn.disabled = false;
         }
     });
 
@@ -104,6 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.success) {
                 updateStatus('✅ Match saved!', false);
                 startBtn.disabled = false;
+                manualHighlightBtn.disabled = false;
                 
                 if (result.video_url) {
                     currentRecordedVideoUrl = result.video_url; // Store for highlights
@@ -114,7 +116,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     downloadLink.download = url.split('/').pop();
                     
                     matchOutputDiv.style.display = 'flex';
-                    genHighlightsBtn.disabled = false;
+                    
+                    // --- AUTO TRIGGER HIGHLIGHTS ---
+                    autoGenerateHighlights(result.video_url);
                 }
             } else {
                 updateStatus('Error: ' + result.message, true);
@@ -164,24 +168,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // HIGHLIGHTS LOGIC
     // ==========================================
 
-    // 1. Generate from Recorded Match
-    genHighlightsBtn.addEventListener('click', async () => {
-        if (!currentRecordedVideoUrl) {
-            updateStatus('No recorded video found.', true);
-            return;
-        }
-
-        updateStatus('✨ Analyzing recorded match for highlights... This may take a few minutes.');
-        genHighlightsBtn.disabled = true;
-        manualHighlightBtn.disabled = true;
-        
+    // 1. Auto-Generate from Recorded Match
+    async function autoGenerateHighlights(videoPath) {
+        updateStatus('✅ Match saved! Now analyzing for highlights... This may take a few minutes.', false);
         hideHighlightOutputs();
 
         try {
             const response = await fetch('/api/process_highlights_from_path', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ video_path: currentRecordedVideoUrl })
+                body: JSON.stringify({ video_path: videoPath })
             });
             const result = await response.json();
 
@@ -193,11 +189,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             updateStatus('Network error generating highlights.', true);
-        } finally {
-            genHighlightsBtn.disabled = false;
-            manualHighlightBtn.disabled = false;
         }
-    });
+    }
 
     // 2. Manual Upload & Generate
     manualHighlightBtn.addEventListener('click', async () => {
@@ -209,7 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateStatus('Uploading video & generating highlights... This may take a few minutes.');
         manualHighlightBtn.disabled = true;
-        genHighlightsBtn.disabled = true;
+        startBtn.disabled = true; // Disable recording while processing upload
 
         hideHighlightOutputs();
 
@@ -233,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus('Network error during upload/generation.', true);
         } finally {
             manualHighlightBtn.disabled = false;
-            genHighlightsBtn.disabled = false;
+            startBtn.disabled = false;
         }
     });
 });
