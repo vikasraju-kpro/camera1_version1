@@ -4,59 +4,94 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Camera Calibration</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
-        h1, h2, h3 { color: #343a40; }
-        .container { max-width: 800px; margin: auto; }
-        .section { margin-bottom: 30px; padding: 20px; border: 1px solid #dee2e6; background-color: #fff; border-radius: 8px; }
-        button, a.download-button, input[type="file"] { padding: 10px 15px; margin: 5px; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; text-decoration: none; display: inline-block; background-color: #fff; color: #343a40; }
-        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
-        #status { margin-top: 15px; font-weight: bold; min-height: 1.4em; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
-        .output img, .output video { display: block; margin-top: 10px; max-width: 100%; height: auto; border-radius: 4px; border: 1px solid #ddd; }
-        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; }
-        .progress-bar { font-size: 1.2em; font-weight: bold; color: #0d6efd;}
+        /* Shared Styles */
+        :root { --primary: #0d6efd; --dark: #343a40; --border: #dee2e6; --light: #f8f9fa; }
+        body { margin: 0; font-family: -apple-system, sans-serif; background: #f1f3f5; padding-bottom: 60px; }
+        * { box-sizing: border-box; }
+
+        /* Navigation */
+        .navbar { background: #fff; padding: 0.8rem 1rem; position: sticky; top: 0; z-index: 1000; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .brand { font-weight: bold; color: var(--primary); text-decoration: none; font-size: 1.2rem; }
+        .brand i { margin-right: 8px; }
+        .hamburger { display: none; flex-direction: column; gap: 5px; cursor: pointer; padding: 5px; }
+        .hamburger span { width: 25px; height: 3px; background: var(--dark); border-radius: 2px; }
+        .nav-links { display: flex; gap: 15px; }
+        .nav-link { text-decoration: none; color: #555; padding: 8px 12px; border-radius: 6px; }
+        .nav-link.active { background: var(--primary); color: white; }
+
+        /* Content */
+        .container { max-width: 800px; margin: 20px auto; padding: 0 15px; }
+        .card { background: #fff; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        h1, h2, h3 { color: var(--dark); margin-top: 0; }
+        h2 { font-size: 1.2rem; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
+        
+        button, input[type="file"] { width: 100%; padding: 12px; margin: 5px 0; border-radius: 6px; border: 1px solid #ccc; background: white; font-weight: 600; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 8px; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        input[type="file"] { background: #f8f9fa; }
+        
+        #status { padding: 15px; background: #e9ecef; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 20px; }
+        .progress-bar { font-size: 1.2em; font-weight: bold; color: var(--primary); text-align: center; margin-bottom: 10px; }
+
+        .output img, .output video { width: 100%; border-radius: 6px; border: 1px solid #ddd; margin-top: 10px; }
+        .download-button { display: block; text-align: center; padding: 12px; background: var(--primary); color: white; text-decoration: none; border-radius: 6px; margin-top: 10px; }
+
+        @media (max-width: 768px) {
+            .hamburger { display: flex; }
+            .nav-links { display: none; position: absolute; top: 100%; left: 0; width: 100%; background: #fff; flex-direction: column; padding: 15px; border-bottom: 1px solid #ddd; }
+            .nav-links.active { display: flex; }
+            .nav-link { width: 100%; text-align: center; padding: 12px; }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav">
-            <a href="/">← Back to Main Control</a>
+    <nav class="navbar">
+        <a href="/" class="brand"><i class="fas fa-camera"></i> Fisheye Control</a>
+        <div class="hamburger" onclick="document.getElementById('navLinks').classList.toggle('active')">
+            <span></span><span></span><span></span>
         </div>
-        <h1>Camera Calibration</h1>
+        <div class="nav-links" id="navLinks">
+            <a href="/record_match" class="nav-link">Record Match</a>
+            <a href="/line_calling" class="nav-link">Line Calling</a>
+            <a href="/calibration" class="nav-link active">Calibration</a>
+            <a href="/files" class="nav-link">Files</a>
+            <a href="/system" class="nav-link">System</a>
+        </div>
+    </nav>
 
+    <div class="container">
+        <h1>Camera Calibration</h1>
         <div id="status">Ready</div>
 
-        <div class="section">
+        <div class="card">
             <h2>Step 1: Capture Calibration Images</h2>
             <p>Point the camera at the checkerboard pattern from various angles and distances. Capture at least 15 good images.</p>
-            <button id="captureCalibBtn">Capture Image</button>
+            <button id="captureCalibBtn"><i class="fas fa-camera"></i> Capture Image</button>
             <div class="progress-bar">
                 Images Collected: <span id="imageCount">0</span> / 15
             </div>
-            <div class="output" id="calib-output">
-                </div>
+            <div class="output" id="calib-output"></div>
         </div>
 
-        <div class="section">
+        <div class="card">
             <h2>Step 2: Run Calibration</h2>
             <p>Once you have enough images, run the calibration process. This may take a moment.</p>
-            <button id="runCalibBtn" disabled>Run Calibration</button>
+            <button id="runCalibBtn" disabled><i class="fas fa-cogs"></i> Run Calibration</button>
         </div>
 
-        <div class="section">
+        <div class="card">
             <h2>Step 3: Test Undistortion</h2>
             <p>Upload a distorted video recorded with this camera to see the result.</p>
-            <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*">
-            <hr>
+            <input type="file" id="videoUpload" accept="video/*">
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
             <p><strong>Option A: Slower, for Web Playback</strong><br>This re-encodes the video so it can play in the browser. Takes longer.</p>
-            <button id="testUndistortBtn">Process & Play in Browser</button>
-            <hr>
+            <button id="testUndistortBtn"><i class="fas fa-play-circle"></i> Process & Play in Browser</button>
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
             <p><strong>Option B: Faster, for Download Only</strong><br>This processes the video quickly but it may not play here. Use this for a fast download.</p>
-            <button id="quickProcessBtn">Quick Process & Download</button>
-            <div class="output" id="test-output">
-                </div>
+            <button id="quickProcessBtn"><i class="fas fa-download"></i> Quick Process & Download</button>
+            <div class="output" id="test-output"></div>
         </div>
-
     </div>
     <script src="{{ url_for('static', filename='calibration.js') }}"></script>
 </body>

@@ -3,56 +3,110 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fisheye Camera Control</title>
+    <title>System Controls</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
-        h1, h2 { color: #343a40; }
-        .container { max-width: 800px; margin: auto; }
-        /* Add nav style */
-        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
-        .controls, .system-controls { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6;}
-        button, a.download-button, a.nav-link { padding: 10px 15px; margin: 5px; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; text-decoration: none; display: inline-block; background-color: #fff; color: #343a40; }
-        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
-        #status { margin-top: 15px; font-weight: bold; min-height: 1.4em; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
-        .output { margin-top: 20px; padding: 1rem; border: 1px solid #dee2e6; background-color: #fff; border-radius: 5px;}
-        .output img, .output video { display: block; margin-top: 10px; max-width: 100%; height: auto; border-radius: 4px; }
-        .output a.download-button { margin-top: 10px; background-color: #0d6efd; color: white; border-color: #0d6efd; }
+        /* --- GLOBAL STYLES --- */
+        :root { --primary: #0d6efd; --dark: #343a40; --light: #f8f9fa; --border: #dee2e6; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f1f3f5; color: var(--dark); padding-bottom: 60px; }
+        * { box-sizing: border-box; }
+
+        /* --- NAVBAR --- */
+        .navbar { background: #fff; padding: 0.8rem 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000; display: flex; justify-content: space-between; align-items: center; }
+        .brand { font-size: 1.2rem; font-weight: 700; color: var(--primary); text-decoration: none; }
+        .brand i { margin-right: 8px; }
+        
+        .hamburger { display: none; flex-direction: column; cursor: pointer; gap: 5px; padding: 5px; }
+        .hamburger span { width: 25px; height: 3px; background-color: var(--dark); border-radius: 2px; transition: 0.3s; }
+        
+        .nav-links { display: flex; gap: 20px; align-items: center; }
+        .nav-link { text-decoration: none; color: #555; font-weight: 500; font-size: 0.95rem; padding: 8px 12px; border-radius: 6px; transition: all 0.2s; }
+        .nav-link:hover, .nav-link.active { background-color: #e7f1ff; color: var(--primary); }
+        
+        /* --- LAYOUT --- */
+        .container { max-width: 800px; margin: 20px auto; padding: 0 15px; }
+        .card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); border: 1px solid var(--border); }
+        h1, h2 { margin-top: 0; color: var(--dark); }
+        h2 { font-size: 1.25rem; margin-bottom: 15px; border-bottom: 2px solid #f1f3f5; padding-bottom: 10px; }
+
+        /* --- BUTTONS --- */
+        .btn-group { display: flex; flex-wrap: wrap; gap: 10px; }
+        button { padding: 12px 20px; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; background-color: #fff; color: var(--dark); border: 1px solid #ccc; transition: transform 0.1s, box-shadow 0.1s; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+        button i { font-size: 1.1em; }
+        button:active { transform: scale(0.98); }
+        button:disabled { background-color: #e9ecef; color: #adb5bd; cursor: not-allowed; border-color: #e9ecef; }
+        
+        .btn-primary { background-color: var(--primary); color: white; border: none; }
+        .btn-danger { background-color: #dc3545; color: white; border: none; }
+        .btn-warning { background-color: #ffc107; color: #000; border: none; }
+
+        /* --- STATUS & OUTPUT --- */
+        #status { padding: 15px; border-radius: 8px; background-color: #e9ecef; font-weight: 600; text-align: center; margin-bottom: 20px; }
+        .output img, .output video { width: 100%; border-radius: 8px; border: 1px solid var(--border); margin-top: 10px; }
+        .download-button { display: block; text-align: center; padding: 12px; background: var(--primary); color: white; text-decoration: none; border-radius: 8px; margin-top: 10px; }
+
+        /* --- MOBILE RESPONSIVE --- */
+        @media (max-width: 768px) {
+            .hamburger { display: flex; }
+            .nav-links { position: absolute; top: 100%; left: 0; width: 100%; background: #fff; flex-direction: column; padding: 15px; gap: 10px; border-bottom: 1px solid var(--border); display: none; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+            .nav-links.active { display: flex; }
+            .nav-link { width: 100%; text-align: center; padding: 12px; background-color: #f8f9fa; }
+            
+            .btn-group { flex-direction: column; }
+            button { width: 100%; padding: 15px; } 
+        }
     </style>
 </head>
 <body>
+    <nav class="navbar">
+        <a href="/" class="brand"><i class="fas fa-camera"></i> Fisheye Control</a>
+        <div class="hamburger" onclick="toggleMenu()">
+            <span></span><span></span><span></span>
+        </div>
+        <div class="nav-links" id="navLinks">
+            <a href="/record_match" class="nav-link">Record Match</a>
+            <a href="/line_calling" class="nav-link">Line Calling</a>
+            <a href="/calibration" class="nav-link">Calibration</a>
+            <a href="/files" class="nav-link">Files</a>
+            <a href="/system" class="nav-link active">System</a>
+        </div>
+    </nav>
+
     <div class="container">
-        <div class="nav">
-            <a href="/calibration" class="nav-link">Go to Camera Calibration →</a>
-            <a href="/files" class="nav-link">Go to File Explorer →</a>
-            <a href="/line_calling" class="nav-link">Go to Line Calling →</a>
-            <a href="/highlights" class="nav-link">Go to Highlights →</a>
-            <a href="/record_match" class="nav-link" style="background-color: #e2f0fb; border-color: #0d6efd;">Go to Record Match →</a>
+        <div id="status">System Ready</div>
+
+        <div class="card">
+            <h2>Live Camera Controls</h2>
+            <div class="btn-group">
+                <button id="captureBtn"><i class="fas fa-camera-retro"></i> Capture Image</button>
+                <button id="startRecordBtn" class="btn-primary"><i class="fas fa-circle"></i> Start Recording</button>
+                <button id="stopRecordBtn" class="btn-danger" disabled><i class="fas fa-stop"></i> Stop Recording</button>
+            </div>
         </div>
 
-        <h1>Fisheye Camera Control</h1>
-
-        <div class="controls">
-            <h2>Camera</h2>
-            <button id="captureBtn">Capture Image</button>
-            <button id="startRecordBtn">Start Recording</button>
-            <button id="stopRecordBtn" disabled>Stop Recording</button>
+        <div class="card">
+            <h2>System Utilities</h2>
+            <div class="btn-group">
+                <button id="statusBtn"><i class="fas fa-info-circle"></i> Device Status</button>
+                <button id="healthBtn"><i class="fas fa-heartbeat"></i> Health Report</button>
+                <button id="restartAppBtn" class="btn-warning"><i class="fas fa-sync"></i> Restart App</button>
+                <button id="restartSystemBtn" class="btn-danger"><i class="fas fa-power-off"></i> Restart System</button>
+            </div>
         </div>
 
-        <div class="system-controls">
-            <h2>System</h2>
-            <button id="statusBtn">Get Device Status</button>
-            <button id="healthBtn">Get Health Report</button>
-            <button id="restartAppBtn">Restart Application</button>
-            <button id="restartSystemBtn">Restart System</button>
-        </div>
-
-        <div id="status">Ready</div>
-
-        <div class="output">
+        <div class="card output">
             <h2>Latest Output</h2>
-            <div id="media-output"></div>
+            <div id="media-output">
+                <p style="color:#888; text-align:center;">No media captured yet.</p>
+            </div>
         </div>
     </div>
+
+    <script>
+        function toggleMenu() {
+            document.getElementById('navLinks').classList.toggle('active');
+        }
+    </script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

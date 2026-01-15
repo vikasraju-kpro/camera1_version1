@@ -4,72 +4,136 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>File Explorer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
-        .container { max-width: 1000px; margin: auto; }
-        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; }
-        h1, h2 { color: #343a40; }
-        #status { margin-top: 15px; font-weight: bold; min-height: 1.4em; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
-        button { padding: 10px 15px; margin: 5px 0; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; background-color: #fff; }
-        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
-        .file-section { margin-bottom: 40px; }
-        .action-bar { margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; background-color: #fff; }
-        th, td { padding: 12px; border: 1px solid #dee2e6; text-align: left; }
-        th { background-color: #e9ecef; }
-        tr:nth-child(even) { background-color: #f8f9fa; }
-        .file-icon { font-size: 1.2em; margin-right: 8px; }
+        /* Shared Styles */
+        :root { --primary: #0d6efd; --dark: #343a40; --border: #dee2e6; --light: #f8f9fa; }
+        body { margin: 0; font-family: -apple-system, sans-serif; background: #f1f3f5; padding-bottom: 60px; }
+        * { box-sizing: border-box; }
 
-        /* --- NEW: Styles for PIN Modal --- */
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; }
-        .modal-content { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; text-align: center; }
-        .modal-content h3 { margin-top: 0; }
-        .modal-content input { width: calc(100% - 20px); padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 5px; }
-        .modal-actions button { margin: 0 5px; }
+        /* Navigation */
+        .navbar { background: #fff; padding: 0.8rem 1rem; position: sticky; top: 0; z-index: 1000; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .brand { font-weight: bold; color: var(--primary); text-decoration: none; font-size: 1.2rem; }
+        .brand i { margin-right: 8px; }
+        .hamburger { display: none; flex-direction: column; gap: 5px; cursor: pointer; padding: 5px; }
+        .hamburger span { width: 25px; height: 3px; background: var(--dark); border-radius: 2px; }
+        .nav-links { display: flex; gap: 15px; }
+        .nav-link { text-decoration: none; color: #555; padding: 8px 12px; border-radius: 6px; }
+        .nav-link.active { background: var(--primary); color: white; }
+
+        /* Content */
+        .container { max-width: 1000px; margin: 20px auto; padding: 0 15px; }
+        .card { background: #fff; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        h1, h2 { color: var(--dark); margin-top: 0; }
+        
+        #status { padding: 15px; background: #e9ecef; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 20px; }
+        
+        .action-bar { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        button { padding: 10px 15px; border-radius: 6px; border: 1px solid #ccc; background: white; cursor: pointer; font-weight: 500; display: flex; align-items: center; gap: 5px; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        /* Tab Styles */
+        .view-controls { display: flex; gap: 10px; margin-bottom: 20px; justify-content: center; }
+        .tab-btn { flex: 1; max-width: 200px; justify-content: center; transition: all 0.2s; }
+        .tab-btn.active { background-color: var(--primary); color: white; border-color: var(--primary); box-shadow: 0 2px 6px rgba(13, 110, 253, 0.3); }
+        
+        /* Table Styles */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; } /* Fixed layout for better control */
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; vertical-align: middle; }
+        th { background-color: #f8f9fa; font-weight: 600; }
+
+        /* Column Widths */
+        th:nth-child(1), td:nth-child(1) { width: 50px; text-align: center; } /* Checkbox */
+        
+        /* Filename Column Handling */
+        td a {
+            text-decoration: none; 
+            color: #0d6efd; 
+            font-weight: 500;
+            /* WRAPPING MAGIC: These 3 lines fix the long filenames */
+            display: block; 
+            word-wrap: break-word;
+            word-break: break-all; 
+        }
+        
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 2000; }
+        .modal-content { background: white; padding: 20px; border-radius: 10px; width: 300px; text-align: center; }
+        .modal-content input { width: 100%; padding: 10px; margin: 15px 0; border: 1px solid #ccc; border-radius: 6px; }
+        .modal-actions { display: flex; gap: 10px; justify-content: center; }
+
+        @media (max-width: 768px) {
+            .hamburger { display: flex; }
+            .nav-links { display: none; position: absolute; top: 100%; left: 0; width: 100%; background: #fff; flex-direction: column; padding: 15px; border-bottom: 1px solid #ddd; }
+            .nav-links.active { display: flex; }
+            .nav-link { width: 100%; text-align: center; padding: 12px; }
+            
+            /* Hide Size and Date columns on small screens */
+            th:nth-child(3), th:nth-child(4), td:nth-child(3), td:nth-child(4) { display: none; } 
+            
+            .action-bar { flex-direction: column; }
+            button { width: 100%; justify-content: center; }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav">
-            <a href="/">← Back to Main Control</a>
+    <nav class="navbar">
+        <a href="/" class="brand"><i class="fas fa-camera"></i> Fisheye Control</a>
+        <div class="hamburger" onclick="document.getElementById('navLinks').classList.toggle('active')">
+            <span></span><span></span><span></span>
         </div>
+        <div class="nav-links" id="navLinks">
+            <a href="/record_match" class="nav-link">Record Match</a>
+            <a href="/line_calling" class="nav-link">Line Calling</a>
+            <a href="/calibration" class="nav-link">Calibration</a>
+            <a href="/files" class="nav-link active">Files</a>
+            <a href="/system" class="nav-link">System</a>
+        </div>
+    </nav>
+
+    <div class="container">
         <h1>File Explorer</h1>
         <div id="status">Loading files...</div>
 
-        <div class="file-section" id="image-section">
-            <h2>🖼️ Images</h2>
+        <div class="view-controls">
+            <button id="btn-show-videos" class="tab-btn active"><i class="fas fa-video"></i> Videos</button>
+            <button id="btn-show-images" class="tab-btn"><i class="fas fa-image"></i> Images</button>
+        </div>
+
+        <div class="card" id="video-section">
+            <h2><i class="fas fa-video"></i> Videos</h2>
             <div class="action-bar">
-                <button class="download-selected" disabled>Download Selected</button>
-                <button class="delete-selected" disabled>Delete Selected</button>
-                <button class="download-all">Download All as ZIP</button>
+                <button class="download-selected" disabled><i class="fas fa-download"></i> Download Selected</button>
+                <button class="delete-selected" disabled><i class="fas fa-trash"></i> Delete Selected</button>
+                <button class="download-all"><i class="fas fa-file-archive"></i> Download All as ZIP</button>
             </div>
             <table>
                 <thead>
                     <tr>
                         <th><input type="checkbox" class="select-all"></th>
                         <th>Filename</th>
-                        <th>Size (MB)</th>
-                        <th>Date Modified</th>
+                        <th>Size</th>
+                        <th>Date</th>
                     </tr>
                 </thead>
                 <tbody class="file-list"></tbody>
             </table>
         </div>
 
-        <div class="file-section" id="video-section">
-            <h2>🎬 Videos</h2>
+        <div class="card" id="image-section" style="display: none;">
+            <h2><i class="fas fa-image"></i> Images</h2>
             <div class="action-bar">
-                <button class="download-selected" disabled>Download Selected</button>
-                <button class="delete-selected" disabled>Delete Selected</button>
-                <button class="download-all">Download All as ZIP</button>
+                <button class="download-selected" disabled><i class="fas fa-download"></i> Download Selected</button>
+                <button class="delete-selected" disabled><i class="fas fa-trash"></i> Delete Selected</button>
+                <button class="download-all"><i class="fas fa-file-archive"></i> Download All as ZIP</button>
             </div>
             <table>
                 <thead>
                     <tr>
                         <th><input type="checkbox" class="select-all"></th>
                         <th>Filename</th>
-                        <th>Size (MB)</th>
-                        <th>Date Modified</th>
+                        <th>Size</th>
+                        <th>Date</th>
                     </tr>
                 </thead>
                 <tbody class="file-list"></tbody>
@@ -79,12 +143,12 @@
 
     <div id="pinModal" class="modal-overlay">
         <div class="modal-content">
-            <h3>Enter PIN to Delete</h3>
+            <h3><i class="fas fa-lock"></i> Security Check</h3>
             <p>Please enter the PIN to confirm deletion.</p>
-            <input type="password" id="pinInput" placeholder="PIN">
+            <input type="password" id="pinInput" placeholder="Enter PIN">
             <div class="modal-actions">
                 <button id="pinCancelBtn">Cancel</button>
-                <button id="pinConfirmBtn">Confirm Delete</button>
+                <button id="pinConfirmBtn" style="background-color: #dc3545; color: white; border: none;">Delete</button>
             </div>
         </div>
     </div>
