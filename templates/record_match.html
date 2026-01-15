@@ -4,95 +4,214 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Record Match & Replay</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
-        .container { max-width: 900px; margin: auto; }
-        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; }
-        .section { margin-bottom: 30px; padding: 20px; border: 1px solid #dee2e6; background-color: #fff; border-radius: 8px; }
-        h1, h2, h3, h4 { color: #343a40; }
-        button, a.nav-link, a.btn-download { padding: 10px 15px; margin: 5px; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; text-decoration: none; display: inline-block; background-color: #fff; color: #343a40; }
-        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
-        
-        /* Button Colors */
-        #startRecordBtn { background-color: #198754; color: white; border-color: #198754; }
-        #stopRecordBtn { background-color: #dc3545; color: white; border-color: #dc3545; }
-        #replayBtn { background-color: #ffc107; color: #000; border-color: #ffc107; font-weight: bold; }
-        #manualHighlightBtn { background-color: #0d6efd; color: white; border-color: #0d6efd; }
+        /* Reusing Global Styles from Index */
+        :root { --primary: #0d6efd; --success: #198754; --danger: #dc3545; --dark: #343a40; --light: #f8f9fa; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f1f3f5; color: var(--dark); padding-bottom: 60px; }
+        * { box-sizing: border-box; }
 
-        #status { margin-top: 15px; font-weight: bold; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
+        /* Navbar & Menu */
+        .navbar { background: #fff; padding: 0.8rem 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000; display: flex; justify-content: space-between; align-items: center; }
+        .brand { font-size: 1.2rem; font-weight: 700; color: var(--primary); text-decoration: none; }
+        .brand i { margin-right: 8px; }
         
-        /* Layouts */
+        .hamburger { display: none; flex-direction: column; cursor: pointer; gap: 5px; padding: 5px; }
+        .hamburger span { width: 25px; height: 3px; background-color: var(--dark); border-radius: 2px; }
+        
+        .nav-links { display: flex; gap: 15px; }
+        .nav-link { text-decoration: none; color: #555; padding: 8px 12px; border-radius: 6px; transition: 0.2s; font-weight: 500; }
+        .nav-link:hover { background-color: #e7f1ff; color: var(--primary); }
+        .nav-link.active { background-color: var(--primary); color: white; }
+
+        /* Cards & Layout */
+        .container { max-width: 900px; margin: 20px auto; padding: 0 15px; }
+        .card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        h1 { text-align: center; margin-bottom: 20px; font-size: 1.8rem; }
+        h2 { border-bottom: 2px solid #f1f3f5; padding-bottom: 10px; margin-top: 0; font-size: 1.3rem; }
+        
+        /* Form Styles */
+        .form-group { margin-bottom: 15px; }
+        .radio-group { display: flex; gap: 20px; margin-bottom: 15px; }
+        .radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500; }
+        .input-row { display: flex; gap: 10px; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+        
+        /* Buttons & Controls */
+        .controls { display: flex; flex-direction: column; gap: 15px; }
+        .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+        button, .file-btn { padding: 14px; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 600; text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        #startRecordBtn { background-color: var(--success); color: white; }
+        #stopRecordBtn { background-color: var(--danger); color: white; }
+        #replayBtn { background-color: #ffc107; color: #000; }
+        #manualHighlightBtn { background-color: var(--primary); color: white; width: 100%; }
+        
+        input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; background: #f8f9fa; }
+
+        #status { padding: 15px; border-radius: 8px; background-color: #e9ecef; font-weight: bold; text-align: center; margin-bottom: 20px; }
+
+        /* Video Output Grid */
         .grid-output { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
-        .video-card { background: #fff; padding: 10px; border: 1px solid #ddd; border-radius: 5px; display: flex; flex-direction: column; }
-        video { width: 100%; border-radius: 4px; margin-top: 10px; border: 1px solid #ddd; }
-        a.btn-download { background-color: #0d6efd; color: white; border: none; margin-top: 10px; text-align: center; }
-        .full-width { grid-column: span 2; }
+        
+        .video-card { 
+            background: #fff; 
+            padding: 15px; 
+            border-radius: 8px; 
+            border: 1px solid #dee2e6;
+            display: flex;
+            flex-direction: column;
+            align-items: center; 
+            text-align: center;
+        }
+        
+        .video-card h3 { margin-top: 0; font-size: 1.1rem; width: 100%; text-align: left; }
+        
+        /* Constrain video size */
+        video { 
+            max-width: 100%; 
+            max-height: 400px; 
+            width: auto;       
+            border-radius: 6px; 
+            background: #000; 
+            margin: 10px 0;
+            display: block;
+        }
+        
+        .btn-download { display: block; width: 100%; background: var(--primary); color: white; text-align: center; padding: 10px; margin-top: auto; border-radius: 6px; text-decoration: none; }
+        
+        .full-width { grid-column: 1 / -1; }
+
+        /* Mobile Styles */
+        @media (max-width: 768px) {
+            .hamburger { display: flex; }
+            .nav-links { display: none; position: absolute; top: 100%; left: 0; width: 100%; background: #fff; flex-direction: column; padding: 15px; border-bottom: 1px solid #ddd; }
+            .nav-links.active { display: flex; }
+            .nav-link { width: 100%; text-align: center; padding: 12px; }
+            
+            .grid-output { grid-template-columns: 1fr; }
+            .btn-row { flex-direction: column; }
+            button { width: 100%; }
+            .input-row { flex-direction: column; }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav">
-            <a href="/" class="nav-link">← Back to Main Control</a>
-            <a href="/line_calling" class="nav-link">Line Calling</a>
-            <a href="/highlights" class="nav-link">Highlights</a>
+    <nav class="navbar">
+        <a href="/" class="brand"><i class="fas fa-camera"></i> Fisheye Control</a>
+        <div class="hamburger" onclick="toggleMenu()">
+            <span></span><span></span><span></span>
         </div>
+        <div class="nav-links" id="navLinks">
+            <a href="/record_match" class="nav-link active">Record Match</a>
+            <a href="/line_calling" class="nav-link">Line Calling</a>
+            <a href="/calibration" class="nav-link">Calibration</a>
+            <a href="/files" class="nav-link">Files</a>
+            <a href="/system" class="nav-link">System</a>
+        </div>
+    </nav>
 
-        <h1>Match Recording & Replay</h1>
+    <div class="container">
+        <h1>Match Center</h1>
         <div id="status">Ready</div>
 
-        <div class="section">
-            <h2>Match Recording</h2>
-            <div class="controls">
-                <button id="startRecordBtn">Start Match Recording</button>
-                <button id="stopRecordBtn" disabled>Stop Match</button>
-                <hr>
-                <p>Press "Instant Replay" to save the <strong>last 30 seconds</strong> as a separate clip without stopping the match.</p>
-                <button id="replayBtn" disabled>⏪ Instant Replay (30s)</button>
+        <div class="card">
+            <h2><i class="fas fa-edit"></i> Match Details</h2>
+            <div class="form-group">
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="matchType" value="singles" checked onchange="togglePlayerInputs()"> Singles
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="matchType" value="doubles" onchange="togglePlayerInputs()"> Doubles
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group" id="players-singles">
+                <div class="input-row">
+                    <input type="text" id="p1" placeholder="Player 1 Name">
+                    <input type="text" id="p2" placeholder="Player 2 Name">
+                </div>
+            </div>
+
+            <div class="form-group" id="players-doubles" style="display: none;">
+                <div class="input-row" style="margin-bottom: 10px;">
+                    <input type="text" id="dp1" placeholder="Team 1 - Player 1">
+                    <input type="text" id="dp2" placeholder="Team 1 - Player 2">
+                </div>
+                <div class="input-row">
+                    <input type="text" id="dp3" placeholder="Team 2 - Player 1">
+                    <input type="text" id="dp4" placeholder="Team 2 - Player 2">
+                </div>
             </div>
         </div>
 
-        <div class="section">
-            <h2>Test Highlights (Manual Upload)</h2>
-            <p>Upload a video file to manually generate and check highlights.</p>
-            <input type="file" id="manualHighlightUpload" accept="video/mp4,video/x-m4v,video/*">
-            <br><br>
-            <button id="manualHighlightBtn">Upload & Generate Highlights</button>
+        <div class="card">
+            <h2><i class="fas fa-video"></i> Live Recording</h2>
+            <div class="controls">
+                <div class="btn-row">
+                    <button id="startRecordBtn"><i class="fas fa-play"></i> Start Match</button>
+                    <button id="stopRecordBtn" disabled><i class="fas fa-stop"></i> Stop Match</button>
+                </div>
+                <div style="text-align: center; color: #666; margin: 5px 0;">— OR —</div>
+                <button id="replayBtn" disabled><i class="fas fa-history"></i> Instant Replay (Last 30s)</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2><i class="fas fa-bolt"></i> Manual Highlights</h2>
+            <p style="margin-top:0; color:#666;">Upload a video to generate highlights if not recording live.</p>
+            <input type="file" id="manualHighlightUpload" accept="video/*">
+            <button id="manualHighlightBtn" style="margin-top: 10px;"><i class="fas fa-cloud-upload-alt"></i> Upload & Generate</button>
         </div>
 
         <div class="grid-output">
-            <div class="video-card" id="match-output" style="display:none;">
-                <h3>🏁 Full Match</h3>
-                <video id="recordedVideo" controls></video>
+            <div class="video-card full-width" id="match-output" style="display:none;">
+                <h3><i class="fas fa-flag-checkered"></i> Full Match Video</h3>
+                <video id="recordedVideo" controls playsinline></video>
                 <a id="downloadLink" class="btn-download" download>Download Match</a>
             </div>
 
-            <div class="video-card" id="replay-output" style="display:none;">
-                <h3>⏪ Latest Replay</h3>
-                <video id="replayVideo" controls autoplay></video>
+            <div class="video-card full-width" id="replay-output" style="display:none;">
+                <h3><i class="fas fa-history"></i> Instant Replay</h3>
+                <video id="replayVideo" controls autoplay playsinline></video>
                 <a id="replayDownloadLink" class="btn-download" download>Download Replay</a>
             </div>
         </div>
 
-        <div id="highlights-output" class="grid-output" style="display:none; margin-top: 40px; border-top: 2px solid #dee2e6; padding-top: 20px;">
-            <h2 class="full-width">✨ AI Highlights</h2>
+        <div id="highlights-output" class="grid-output" style="display:none; margin-top: 30px;">
+            <div class="full-width" style="border-top: 2px solid #eee; margin-bottom: 10px;"></div>
+            <h2 class="full-width"><i class="fas fa-magic"></i> AI Highlights</h2>
+            
             <div class="video-card full-width" id="cardHighlights" style="display:none;">
-                <h3>🏆 Match Highlights</h3>
-                <video id="vidHighlights" controls></video>
-                <a id="dlHighlights" class="btn-download" download>Download Highlights</a>
+                <h3><i class="fas fa-trophy"></i> Full Highlights Reel</h3>
+                <video id="vidHighlights" controls playsinline></video>
+                <a id="dlHighlights" class="btn-download" download>Download Reel</a>
             </div>
             <div class="video-card" id="cardLongest" style="display:none;">
                 <h3>Longest Rally</h3>
-                <video id="vidLongest" controls></video>
-                <a id="dlLongest" class="btn-download" download>Download Clip</a>
+                <video id="vidLongest" controls playsinline></video>
+                <a id="dlLongest" class="btn-download" download>Download</a>
             </div>
             <div class="video-card" id="cardShortest" style="display:none;">
                 <h3>Shortest Rally</h3> 
-                <video id="vidShortest" controls></video>
-                <a id="dlShortest" class="btn-download" download>Download Clip</a>
+                <video id="vidShortest" controls playsinline></video>
+                <a id="dlShortest" class="btn-download" download>Download</a>
             </div>
         </div>
     </div>
 
+    <script>
+        function toggleMenu() { document.getElementById('navLinks').classList.toggle('active'); }
+        
+        function togglePlayerInputs() {
+            const isSingles = document.querySelector('input[name="matchType"]:checked').value === 'singles';
+            document.getElementById('players-singles').style.display = isSingles ? 'block' : 'none';
+            document.getElementById('players-doubles').style.display = isSingles ? 'none' : 'block';
+        }
+    </script>
     <script src="{{ url_for('static', filename='record_match.js') }}"></script>
 </body>
 </html>

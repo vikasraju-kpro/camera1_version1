@@ -5,7 +5,7 @@ import threading
 import time
 import cv2 
 import io 
-from flask import Flask, render_template, jsonify, url_for, request, send_file
+from flask import Flask, render_template, jsonify, url_for, request, send_file, redirect
 
 from common.camera_controller import (
     initialize_camera,
@@ -320,11 +320,17 @@ def run_inference_task(input_video_path, manual_points=None):
 # --- Page Rendering Routes ---
 @app.route("/")
 def index():
-    return render_template("index.html")
+    # Redirect root URL to Record Match page (Making it the main tab)
+    return redirect(url_for('record_match_page'))
 
 @app.route("/record_match")
 def record_match_page():
     return render_template("record_match.html")
+
+@app.route("/system")
+def system_page():
+    # Renders the old index.html as the System/Controls page
+    return render_template("index.html")
 
 @app.route("/calibration")
 def calibration_page():
@@ -337,10 +343,6 @@ def file_explorer_page():
 @app.route("/line_calling")
 def line_calling_page():
     return render_template("line_calling.html")
-
-@app.route("/highlights")
-def highlights_page():
-    return render_template("highlights.html")
 
 
 # --- Camera Control Routes ---
@@ -366,10 +368,33 @@ def capture_image_route():
 
 @app.route("/start_recording", methods=["POST"])
 def start_recording_route():
+    # Extract JSON data if available
+    data = request.get_json(silent=True)
+    
+    # Base timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"recording_{timestamp}{VIDEO_EXTENSION}"
+    
+    # Construct filename based on match details
+    if data and 'type' in data:
+        match_type = data['type'] # 'singles' or 'doubles'
+        players = data.get('players', [])
+        
+        # Sanitize names (replace spaces with underscores, keep only alphanumeric)
+        safe_players = ["".join(c for c in p if c.isalnum() or c in (' ', '_')).replace(' ', '_') for p in players]
+        
+        if match_type == 'singles' and len(safe_players) >= 2:
+            filename = f"match_{timestamp}_Singles_{safe_players[0]}_vs_{safe_players[1]}{VIDEO_EXTENSION}"
+        elif match_type == 'doubles' and len(safe_players) >= 4:
+            filename = f"match_{timestamp}_Doubles_{safe_players[0]}_{safe_players[1]}_vs_{safe_players[2]}_{safe_players[3]}{VIDEO_EXTENSION}"
+        else:
+            filename = f"match_{timestamp}_{match_type}{VIDEO_EXTENSION}"
+    else:
+        # Fallback for manual or legacy calls
+        filename = f"recording_{timestamp}{VIDEO_EXTENSION}"
+
     filepath = os.path.join(OUTPUT_DIR_VIDEOS, filename)
     success, message = start_recording(filepath)
+    
     if success:
         return jsonify({"success": True, "message": message})
     else:

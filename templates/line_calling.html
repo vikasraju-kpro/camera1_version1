@@ -4,127 +4,113 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Line Calling</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background-color: #f8f9fa; line-height: 1.5; }
-        h1, h2, h3 { color: #343a40; }
-        .container { max-width: 800px; margin: auto; }
-        .nav { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6; }
-        .controls, .inference-controls { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #dee2e6;}
-        button, a.download-button, a.nav-link { padding: 10px 15px; margin: 5px; cursor: pointer; border-radius: 5px; font-size: 1em; border: 1px solid #ccc; text-decoration: none; display: inline-block; background-color: #fff; color: #343a40; }
-        button:disabled { cursor: not-allowed; background-color: #e9ecef; }
-        #status { margin-top: 15px; font-weight: bold; min-height: 1.4em; padding: 10px; background-color: #e9ecef; border-radius: 5px;}
-        .output { margin-top: 20px; padding: 1rem; border: 1px solid #dee2e6; background-color: #fff; border-radius: 5px;}
-        .output img, .output video { display: block; margin-top: 10px; max-width: 100%; height: auto; border-radius: 4px; }
-        a.download-button { margin-top: 10px; background-color: #0d6efd; color: white; border-color: #0d6efd; }
-        /* Style for the run inference button */
-        #runOnLatestBtn { background-color: #198754; color: white; border-color: #198754; display: none; }
-        /* Style for the 2D illustration */
-        #media-output-2d img, #media-output-2d-zoom img { 
-            border: 1px solid #ddd; 
-            max-width: 400px; /* Control size */
-        }
-        /* Style for output sections */
-        .output-section { margin-top: 20px; }
+        /* Shared Styles */
+        :root { --primary: #0d6efd; --dark: #343a40; --border: #dee2e6; }
+        body { margin: 0; font-family: -apple-system, sans-serif; background: #f1f3f5; padding-bottom: 60px; }
+        * { box-sizing: border-box; }
+
+        /* Navigation */
+        .navbar { background: #fff; padding: 0.8rem 1rem; position: sticky; top: 0; z-index: 1000; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .brand { font-weight: bold; color: var(--primary); text-decoration: none; font-size: 1.2rem; }
+        .brand i { margin-right: 8px; }
+        .hamburger { display: none; flex-direction: column; gap: 5px; cursor: pointer; padding: 5px; }
+        .hamburger span { width: 25px; height: 3px; background: var(--dark); border-radius: 2px; }
+        .nav-links { display: flex; gap: 15px; }
+        .nav-link { text-decoration: none; color: #555; padding: 8px 12px; border-radius: 6px; }
+        .nav-link.active { background: var(--primary); color: white; }
+
+        /* Content */
+        .container { max-width: 800px; margin: 20px auto; padding: 0 15px; }
+        .card { background: #fff; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        h1, h2, h3 { color: var(--dark); margin-top: 0; }
+        h2 { font-size: 1.2rem; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
         
-        /* --- NEW: Styles for Semi-Auto --- */
-        #semi-auto-controls {
-            display: none; /* Hidden by default */
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #0d6efd;
-            background-color: #fff;
-            border-radius: 8px;
-        }
-        #frame-display-container {
-            position: relative;
-            max-width: 100%;
-            cursor: crosshair;
-            background-color: #eee;
-            min-height: 200px; /* Placeholder height */
-        }
-        #frame-display-container img {
-            max-width: 100%;
-            height: auto;
-            display: block;
-        }
-        #frame-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-        }
-        #semi-auto-status {
-            font-weight: bold;
-            color: #0d6efd;
-            margin: 10px 0;
-            font-size: 1.1em;
-        }
-        #runSemiAutoBtn {
-            background-color: #198754;
-            color: white;
-            display: none; /* Hidden until 4 points are clicked */
+        button { width: 100%; padding: 12px; margin: 5px 0; border-radius: 6px; border: 1px solid #ccc; background: white; font-weight: 600; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 8px; }
+        button.primary { background: var(--primary); color: white; border: none; }
+        input[type="file"] { width: 100%; padding: 10px; background: #f8f9fa; border: 1px solid #ccc; border-radius: 6px; }
+        
+        #status { padding: 15px; background: #e9ecef; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 20px; }
+
+        /* Semi-Auto Canvas */
+        #frame-display-container { position: relative; width: 100%; overflow: hidden; border-radius: 6px; background: #000; }
+        #frame-display-container img { width: 100%; display: block; }
+        #frame-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+        /* Outputs */
+        .output-media img, .output-media video { width: 100%; border-radius: 6px; border: 1px solid #ddd; margin-top: 10px; }
+
+        @media (max-width: 768px) {
+            .hamburger { display: flex; }
+            .nav-links { display: none; position: absolute; top: 100%; left: 0; width: 100%; background: #fff; flex-direction: column; padding: 15px; border-bottom: 1px solid #ddd; }
+            .nav-links.active { display: flex; }
+            .nav-link { width: 100%; text-align: center; padding: 12px; }
         }
     </style>
 </head>
 <body>
+    <nav class="navbar">
+        <a href="/" class="brand"><i class="fas fa-camera"></i> Fisheye Control</a>
+        <div class="hamburger" onclick="document.getElementById('navLinks').classList.toggle('active')">
+            <span></span><span></span><span></span>
+        </div>
+        <div class="nav-links" id="navLinks">
+            <a href="/record_match" class="nav-link">Record Match</a>
+            <a href="/line_calling" class="nav-link active">Line Calling</a>
+            <a href="/calibration" class="nav-link">Calibration</a>
+            <a href="/files" class="nav-link">Files</a>
+            <a href="/system" class="nav-link">System</a>
+        </div>
+    </nav>
+
     <div class="container">
-        <div class="nav">
-            <a href="/" class="nav-link">← Back to Main Control</a>
-        </div>
-
         <h1>Line Calling</h1>
-
-        <div class="controls">
-            <h2>Recording</h2>
-            <p>Record a new video clip.</p>
-            <button id="startLineCallBtn">Start Line Calling</button>
-            <button id="stopLineCallBtn" disabled>Stop Line Calling</button>
-            <hr>
-            <button id="recordAutoRunBtn" disabled>Auto-Run Inference</button>
-            <button id="recordSemiAutoBtn" disabled>Semi-Auto Inference</button>
-        </div>
-
-        <div class="inference-controls">
-            <h2>Test Inference</h2>
-            <p>Upload a video file to run the shuttle tracking inference.</p>
-            <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*">
-            <hr>
-            <button id="autoRunBtn">Upload & Auto-Run Inference</button>
-            <button id="semiAutoUploadBtn">Upload & Semi-Auto Inference</button> </div>
-        
-        <div id="semi-auto-controls">
-            <h2>Semi-Auto Marking</h2>
-            <div id="semi-auto-status">Loading video frame...</div>
-            <div>
-                <button id="prevFrameBtn" disabled>&larr; Prev Frame</button>
-                <button id="nextFrameBtn">Next Frame &rarr;</button>
-                <span style="margin-left: 10px;">Frame: <span id="currentFrameNum">0</span></span>
-            </div>
-            <div id="frame-display-container">
-                <img id="frame-image" alt="Video frame for marking" />
-                <canvas id="frame-canvas"></canvas>
-            </div>
-            <button id="runSemiAutoBtn">Run Semi-Auto Inference</button>
-        </div>
-
         <div id="status">Ready</div>
 
-        <div class="output">
-            <h2>Latest Output</h2>
-            <button id="runOnLatestBtn">Run Inference on This Video</button>
-            
-            <div id="media-output" class="output-section">
-                </div>
-            
-            <div id="media-output-replay" class="output-section">
-                </div>
+        <div class="card">
+            <h2>1. Recording (Live)</h2>
+            <button id="startLineCallBtn" class="primary"><i class="fas fa-circle"></i> Start Recording</button>
+            <button id="stopLineCallBtn" disabled><i class="fas fa-stop"></i> Stop & Save</button>
+            <div style="margin-top:10px; display:flex; gap:10px;">
+                <button id="recordAutoRunBtn" disabled><i class="fas fa-robot"></i> Auto-Run</button>
+                <button id="recordSemiAutoBtn" disabled><i class="fas fa-mouse-pointer"></i> Semi-Auto</button>
+            </div>
+        </div>
 
-            <div id="media-output-2d-zoom" class="output-section">
-                </div>
+        <div class="card">
+            <h2>2. Upload & Test</h2>
+            <input type="file" id="videoUpload" accept="video/*">
+            <div style="margin-top:10px; display:flex; gap:10px;">
+                <button id="autoRunBtn"><i class="fas fa-robot"></i> Auto-Run</button>
+                <button id="semiAutoUploadBtn"><i class="fas fa-mouse-pointer"></i> Semi-Auto</button>
+            </div>
+        </div>
 
-            <div id="media-output-2d" class="output-section">
-                </div>
+        <div id="semi-auto-controls" class="card" style="display:none; border: 2px solid #0d6efd;">
+            <h2 style="color:#0d6efd;"><i class="fas fa-map-marker-alt"></i> Mark Court Corners</h2>
+            <div id="semi-auto-status" style="margin-bottom:10px;">Loading...</div>
+            
+            <div id="frame-display-container">
+                <img id="frame-image" alt="Frame" />
+                <canvas id="frame-canvas"></canvas>
+            </div>
+            
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button id="prevFrameBtn" disabled><i class="fas fa-arrow-left"></i> Prev</button>
+                <span id="currentFrameNum" style="padding:10px;">0</span>
+                <button id="nextFrameBtn">Next <i class="fas fa-arrow-right"></i></button>
+            </div>
+            <button id="runSemiAutoBtn" class="primary" style="margin-top:15px; display:none;">Run Inference</button>
+        </div>
+
+        <div class="card">
+            <h2>Results</h2>
+            <button id="runOnLatestBtn" style="display:none;">Run on Latest</button>
+            <div id="media-output" class="output-media"></div>
+            <div id="media-output-replay" class="output-media"></div>
+            <div id="media-output-2d-zoom" class="output-media"></div>
+            <div id="media-output-2d" class="output-media"></div>
         </div>
     </div>
     <script src="{{ url_for('static', filename='line_calling.js') }}"></script>

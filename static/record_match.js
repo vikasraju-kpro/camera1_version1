@@ -23,10 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- State Variables ---
     let currentRecordedVideoUrl = null;
+    let currentMatchType = 'singles'; // Default
 
     // --- Helper Functions ---
     function updateStatus(message, isError = false) {
-        statusDiv.textContent = message;
+        statusDiv.innerHTML = message;
         statusDiv.style.color = isError ? '#dc3545' : '#198754';
         statusDiv.style.backgroundColor = isError ? '#f8d7da' : '#d1e7dd';
     }
@@ -59,42 +60,76 @@ document.addEventListener('DOMContentLoaded', () => {
         highlightsOutputDiv.style.display = 'none';
     }
 
+    function getMatchDetails() {
+        const type = document.querySelector('input[name="matchType"]:checked').value;
+        let players = [];
+        
+        if (type === 'singles') {
+            const p1 = document.getElementById('p1').value.trim();
+            const p2 = document.getElementById('p2').value.trim();
+            if (!p1 || !p2) return null; // Validation failed
+            players = [p1, p2];
+        } else {
+            const dp1 = document.getElementById('dp1').value.trim();
+            const dp2 = document.getElementById('dp2').value.trim();
+            const dp3 = document.getElementById('dp3').value.trim();
+            const dp4 = document.getElementById('dp4').value.trim();
+            if (!dp1 || !dp2 || !dp3 || !dp4) return null;
+            players = [dp1, dp2, dp3, dp4];
+        }
+        return { type, players };
+    }
+
     // ==========================================
     // RECORDING & REPLAY LOGIC
     // ==========================================
 
     startBtn.addEventListener('click', async () => {
-        updateStatus('Starting match recording...');
+        // 1. Validate Input
+        const details = getMatchDetails();
+        if (!details) {
+            updateStatus('<i class="fas fa-exclamation-circle"></i> Please enter all player names before starting.', true);
+            return;
+        }
+
+        currentMatchType = details.type; // Store for stop logic
+
+        updateStatus('<i class="fas fa-spinner fa-spin"></i> Starting match recording...');
         startBtn.disabled = true;
         stopBtn.disabled = true;
-        manualHighlightBtn.disabled = true; // Disable manual upload while recording
+        manualHighlightBtn.disabled = true; 
         
         // Hide previous outputs
         matchOutputDiv.style.display = 'none';
         hideHighlightOutputs();
 
         try {
-            const response = await fetch('/start_recording', { method: 'POST' });
+            // 2. Send Data to Backend
+            const response = await fetch('/start_recording', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(details)
+            });
             const result = await response.json();
             
             if (result.success) {
-                updateStatus('🔴 Match Recording in progress...', false);
+                updateStatus('<i class="fas fa-circle fa-beat" style="color: red;"></i> Match Recording in progress...', false);
                 stopBtn.disabled = false;
                 replayBtn.disabled = false;
             } else {
-                updateStatus('Error: ' + result.message, true);
+                updateStatus('<i class="fas fa-exclamation-triangle"></i> Error: ' + result.message, true);
                 startBtn.disabled = false;
                 manualHighlightBtn.disabled = false;
             }
         } catch (error) {
-            updateStatus('Network error starting recording.', true);
+            updateStatus('<i class="fas fa-exclamation-circle"></i> Network error starting recording.', true);
             startBtn.disabled = false;
             manualHighlightBtn.disabled = false;
         }
     });
 
     stopBtn.addEventListener('click', async () => {
-        updateStatus('Stopping match... Finalizing video file.');
+        updateStatus('<i class="fas fa-spinner fa-spin"></i> Stopping match... Finalizing video file.');
         stopBtn.disabled = true;
         replayBtn.disabled = true;
 
@@ -103,12 +138,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.success) {
-                updateStatus('✅ Match saved!', false);
+                updateStatus('<i class="fas fa-check-circle"></i> Match saved!', false);
                 startBtn.disabled = false;
                 manualHighlightBtn.disabled = false;
                 
                 if (result.video_url) {
-                    currentRecordedVideoUrl = result.video_url; // Store for highlights
+                    currentRecordedVideoUrl = result.video_url; 
                     
                     const url = result.video_url + '?t=' + new Date().getTime();
                     recordedVideo.src = url;
@@ -117,23 +152,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     matchOutputDiv.style.display = 'flex';
                     
-                    // --- AUTO TRIGGER HIGHLIGHTS ---
-                    autoGenerateHighlights(result.video_url);
+                    // --- CONDITIONAL HIGHLIGHTS ---
+                    if (currentMatchType === 'singles') {
+                        autoGenerateHighlights(result.video_url);
+                    } else {
+                        updateStatus('<i class="fas fa-check-circle"></i> Doubles Match saved! (AI Highlights skipped for Doubles)', false);
+                    }
                 }
             } else {
-                updateStatus('Error: ' + result.message, true);
+                updateStatus('<i class="fas fa-exclamation-triangle"></i> Error: ' + result.message, true);
                 stopBtn.disabled = false;
                 replayBtn.disabled = false;
             }
         } catch (error) {
-            updateStatus('Network error stopping recording.', true);
+            updateStatus('<i class="fas fa-exclamation-circle"></i> Network error stopping recording.', true);
             stopBtn.disabled = false;
         }
     });
 
     replayBtn.addEventListener('click', async () => {
-        const originalText = replayBtn.innerText;
-        replayBtn.innerText = "⏳ Saving...";
+        const originalText = replayBtn.innerHTML; 
+        replayBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
         replayBtn.disabled = true;
 
         try {
@@ -141,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.success) {
-                updateStatus('✅ Replay clip created!', false);
+                updateStatus('<i class="fas fa-check-circle"></i> Replay clip created!', false);
                 
                 if (result.video_url) {
                     const url = result.video_url + '?t=' + new Date().getTime();
@@ -152,13 +191,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     replayOutputDiv.scrollIntoView({ behavior: 'smooth' });
                 }
             } else {
-                updateStatus('Replay Error: ' + result.message, true);
+                updateStatus('<i class="fas fa-exclamation-triangle"></i> Replay Error: ' + result.message, true);
             }
         } catch (error) {
-            updateStatus('Network error creating replay.', true);
+            updateStatus('<i class="fas fa-exclamation-circle"></i> Network error creating replay.', true);
         } finally {
             setTimeout(() => {
-                replayBtn.innerText = originalText;
+                replayBtn.innerHTML = originalText;
                 replayBtn.disabled = false;
             }, 2000);
         }
@@ -168,9 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // HIGHLIGHTS LOGIC
     // ==========================================
 
-    // 1. Auto-Generate from Recorded Match
     async function autoGenerateHighlights(videoPath) {
-        updateStatus('✅ Match saved! Now analyzing for highlights... This may take a few minutes.', false);
+        updateStatus('<i class="fas fa-check-circle"></i> Match saved! <i class="fas fa-magic"></i> Analyzing for highlights... This may take a few minutes.', false);
         hideHighlightOutputs();
 
         try {
@@ -182,13 +220,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.success) {
-                updateStatus('✅ Highlights generated successfully!', false);
+                updateStatus('<i class="fas fa-check-circle"></i> Highlights generated successfully!', false);
                 setupHighlightCards(result);
             } else {
-                updateStatus('Highlight Error: ' + result.message, true);
+                updateStatus('<i class="fas fa-exclamation-triangle"></i> Highlight Error: ' + result.message, true);
             }
         } catch (error) {
-            updateStatus('Network error generating highlights.', true);
+            updateStatus('<i class="fas fa-exclamation-circle"></i> Network error generating highlights.', true);
         }
     }
 
@@ -196,13 +234,13 @@ document.addEventListener('DOMContentLoaded', () => {
     manualHighlightBtn.addEventListener('click', async () => {
         const file = manualHighlightUpload.files[0];
         if (!file) {
-            updateStatus('Please select a video file to upload first.', true);
+            updateStatus('<i class="fas fa-exclamation-circle"></i> Please select a video file to upload first.', true);
             return;
         }
 
-        updateStatus('Uploading video & generating highlights... This may take a few minutes.');
+        updateStatus('<i class="fas fa-spinner fa-spin"></i> Uploading video & generating highlights... This may take a few minutes.');
         manualHighlightBtn.disabled = true;
-        startBtn.disabled = true; // Disable recording while processing upload
+        startBtn.disabled = true; 
 
         hideHighlightOutputs();
 
@@ -217,13 +255,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.success) {
-                updateStatus('✅ Highlights generated successfully from upload!', false);
+                updateStatus('<i class="fas fa-check-circle"></i> Highlights generated successfully from upload!', false);
                 setupHighlightCards(result);
             } else {
-                updateStatus('Highlight Error: ' + result.message, true);
+                updateStatus('<i class="fas fa-exclamation-triangle"></i> Highlight Error: ' + result.message, true);
             }
         } catch (error) {
-            updateStatus('Network error during upload/generation.', true);
+            updateStatus('<i class="fas fa-exclamation-circle"></i> Network error during upload/generation.', true);
         } finally {
             manualHighlightBtn.disabled = false;
             startBtn.disabled = false;

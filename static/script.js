@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Helper Functions ---
     function updateStatus(message, isError = false) {
-        statusDiv.textContent = message;
+        statusDiv.innerHTML = message; // CHANGED to innerHTML
         statusDiv.style.color = isError ? '#dc3545' : '#198754';
         statusDiv.style.backgroundColor = isError ? '#f8d7da' : '#d1e7dd';
     }
@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Event Listeners for Main Page ---
     captureBtn.addEventListener('click', async () => {
-        updateStatus('Capturing image...');
+        updateStatus('<i class="fas fa-spinner fa-spin"></i> Capturing image...');
         try {
             const response = await fetch('/capture_image', { method: 'POST' });
             const result = await response.json();
@@ -61,12 +61,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 displayImage(result.image_url);
             }
         } catch (error) {
-            updateStatus('A network error occurred.', true);
+            updateStatus('<i class="fas fa-exclamation-triangle"></i> A network error occurred.', true);
         }
     });
 
     startRecordBtn.addEventListener('click', async () => {
-        updateStatus('Starting recording...');
+        updateStatus('<i class="fas fa-spinner fa-spin"></i> Starting recording...');
         try {
             const response = await fetch('/start_recording', { method: 'POST' });
             const result = await response.json();
@@ -76,12 +76,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 stopRecordBtn.disabled = false;
             }
         } catch (error) {
-            updateStatus('A network error occurred.', true);
+            updateStatus('<i class="fas fa-exclamation-triangle"></i> A network error occurred.', true);
         }
     });
 
     stopRecordBtn.addEventListener('click', async () => {
-        updateStatus('Stopping recording and processing video...');
+        updateStatus('<i class="fas fa-spinner fa-spin"></i> Stopping recording and processing video...');
         try {
             const response = await fetch('/stop_recording', { method: 'POST' });
             const result = await response.json();
@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         } catch (error) {
-            updateStatus('A network error occurred.', true);
+            updateStatus('<i class="fas fa-exclamation-triangle"></i> A network error occurred.', true);
         }
     });
 
@@ -102,10 +102,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/device_status');
             const data = await response.json();
-            const statusMessage = `Device: ${data.name} (ID: ${data.device_id}) - Status: ${data.message}`;
+            const statusMessage = `<i class="fas fa-info-circle"></i> Device: ${data.name} (ID: ${data.device_id}) - Status: ${data.message}`;
             updateStatus(statusMessage);
         } catch (error) {
-            updateStatus('Failed to get device status.', true);
+            updateStatus('<i class="fas fa-exclamation-triangle"></i> Failed to get device status.', true);
         }
     });
 
@@ -117,29 +117,27 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.error) {
                 updateStatus(`Error: ${data.details}`, true);
             } else {
-                // Build the health report string
-                let report = `Device ID: ${data.device_id} | CPU: ${data.cpu_usage_percent}% | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
-                // Add temperature if it exists in the response
+                let report = `<i class="fas fa-heartbeat"></i> Device ID: ${data.device_id} | CPU: ${data.cpu_usage_percent}% | Memory: ${data.memory_usage_percent}% | Disk: ${data.disk_usage_percent}%`;
                 if (data.cpu_temperature_c !== null) {
                     report += ` | Temp: ${data.cpu_temperature_c}°C`;
                 }
                 updateStatus(report, false);
             }
         } catch (error) {
-            updateStatus('Failed to get health report.', true);
+            updateStatus('<i class="fas fa-exclamation-triangle"></i> Failed to get health report.', true);
         }
     });
 
     restartAppBtn.addEventListener('click', async () => {
         if (confirm('Are you sure you want to restart the application?')) {
-            updateStatus('Restarting application...');
+            updateStatus('<i class="fas fa-sync fa-spin"></i> Restarting application...');
             await fetch('/restart_app', { method: 'POST' });
         }
     });
 
     restartSystemBtn.addEventListener('click', async () => {
         if (confirm('Are you sure you want to RESTART THE ENTIRE SYSTEM?')) {
-            updateStatus('Restarting system...');
+            updateStatus('<i class="fas fa-power-off"></i> Restarting system...');
             await fetch('/restart_system', { method: 'POST' });
         }
     });
